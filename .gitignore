@@ -136,3 +136,4 @@ dmypy.json
 
 # slurm otuputs
 sout/
+configs/api_key.yaml

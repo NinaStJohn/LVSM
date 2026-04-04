@@ -28,6 +28,8 @@
 
 <br>
 
+## -1. Prefix
+This is a branch from below. I will be updating the README has we go along.
 
 ## 0. Clarification
 
@@ -52,28 +54,13 @@ pip install -r requirements.txt
 As we used [xformers](https://github.com/facebookresearch/xformers) `memory_efficient_attention`, the GPU device compute capability needs > 8.0. Otherwise, it would pop up an error. Check your GPU compute capability in [CUDA GPUs Page](https://developer.nvidia.com/cuda-gpus#compute).
 
 ### Data
-Download the RealEstate10K dataset from [this link](http://schadenfreude.csail.mit.edu:8000/), which is provided by [pixelSplat](https://github.com/dcharatan/pixelsplat), and `unzip` the zip file and put the data in `YOUR_RAW_DATAPATH`.
-Run the following command to preprocess the data into our format.
+Using the DVSM-10k database
 ```bash
-python process_data.py --base_path YOUR_RAW_DATAPATH --output_dir YOUR_PROCESSED_DATAPATH --mode ['train' or 'test']
+python process_dataDL3DV-10k.py --base_path YOUR_RAW_DATAPATH --output_dir YOUR_PROCESSED_DATAPATH --mode ['train' or 'test']
 ```
-
-### Checkpoints
-The scene-level evaluation is conducted on the [RealEstate10K](http://schadenfreude.csail.mit.edu:8000/) dataset prepocessed by [pixelSplat](https://github.com/dcharatan/pixelsplat). The model checkpoints are host on [HuggingFace](https://huggingface.co/coast01/LVSM/tree/main). 
-
-| Model | PSNR  | SSIM  | LPIPS |
-| ----- | ----- | ----- | ----- |
-| [LVSM Decoder-Only Scene-Level res256×256 (full)](https://huggingface.co/coast01/LVSM/resolve/main/scene_decoder_only_256.pt?download=true) | 29.67 | 0.906 | 0.098 |
-| [LVSM Encoder-Decoder Scene-Level res256×256 (full)](https://huggingface.co/coast01/LVSM/resolve/main/scene_encoder_decoder_256.pt?download=true) | 28.60 | 0.893 | 0.114 |
-| [LVSM Decoder-Only Scene-Level res512×512](https://huggingface.co/coast01/LVSM/blob/main/lvsm_scene_decoder_only_res512.pt) | N/A | N/A | N/A |
-| [LVSM Encoder-Decoder Scene-Level res512×512](https://huggingface.co/coast01/LVSM/blob/main/lvsm_scene_encoder_decoder_res512.pt) | N/A | N/A | N/A |
-
-As we discussed in the limitation sections of this paper:
-
->Our model’s performance degrades when provided with images with aspect ratios and resolutions different from those seen during training.
-
-Therefore, if you plan to use the model for inference at resolutions or aspect ratios different from those used to train our provided checkpoints (256×256 or 512×512), we recommend fine-tuning the model for the specific resolution and aspect ratio.
-
+```
+pip install --upgrade wandb 
+```
 
 
 ## 2. Training
