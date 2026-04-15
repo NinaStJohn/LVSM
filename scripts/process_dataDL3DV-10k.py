@@ -1,4 +1,7 @@
 # DL3DV-10K -> LVSM-style preprocessing script
+# Supports all subsets (1K-10K), auto train/test split, and outputs:
+#   - LVSM format: per-scene JSON metadata + full_list.txt
+#   - AE format:   flat image_list.txt with one absolute image path per line
 
 import os
 import re
@@ -19,30 +22,17 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-
 FRAME_ID_RE = re.compile(r"frame_(\d+)\.(png|jpg|jpeg)$", re.IGNORECASE)
+SUBSET_NAMES = [f"{i}K" for i in range(1, 11)]  # 1K .. 10K
 
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def parse_frame_id(file_path: str) -> Optional[int]:
     m = FRAME_ID_RE.search(os.path.basename(file_path))
-    if not m:
-        return None
-    return int(m.group(1))
-
-
-def generate_full_list(base_path: str, output_dir: str) -> None:
-    json_files = [
-        os.path.join(base_path, f)
-        for f in os.listdir(base_path)
-        if f.endswith(".json")
-    ]
-    json_files = [os.path.abspath(f) for f in json_files]
-    json_files.sort()
-
-    os.makedirs(output_dir, exist_ok=True)
-    with open(os.path.join(output_dir, "full_list.txt"), "w") as f:
-        for file in json_files:
-            f.write(file + "\n")
+    return int(m.group(1)) if m else None
 
 
 def safe_load_json(path: str) -> Dict:
@@ -58,6 +48,33 @@ def ensure_split_dirs(output_root: str, split: str) -> Tuple[str, str]:
     return images_dir, meta_dir
 
 
+def make_train_test_split(
+    frame_ids: List[int],
+    test_fraction: float = 0.1,
+    min_test: int = 1,
+) -> Tuple[set, set]:
+    """Hold out every N-th frame as test when no split JSON is present."""
+    sorted_ids = sorted(frame_ids)
+    n = len(sorted_ids)
+    n_test = max(min_test, int(round(n * test_fraction)))
+    step = max(1, n // n_test)
+    test_ids = set(sorted_ids[i] for i in range(0, n, step))
+    train_ids = set(sorted_ids) - test_ids
+    return train_ids, test_ids
+
+
+def link_or_copy(src: str, dst: str, use_symlink: bool) -> None:
+    if use_symlink:
+        if not os.path.exists(dst):
+            os.symlink(os.path.abspath(src), dst)
+    else:
+        shutil.copy2(src, dst)
+
+
+# ---------------------------------------------------------------------------
+# Per-frame record builder
+# ---------------------------------------------------------------------------
+
 def build_frame_record(
     scene_dir: str,
     frame_entry: Dict,
@@ -66,8 +83,12 @@ def build_frame_record(
     cx: float,
     cy: float,
     seq_images_dir: str,
-    copy_images: bool,
+    use_symlink: bool,
 ) -> Optional[Dict]:
+    """
+    Returns an LVSM-format record dict, or None on failure.
+    Also creates the image file/symlink at seq_images_dir/<img_name>.
+    """
     rel_img_path = frame_entry.get("file_path")
     if rel_img_path is None:
         return None
@@ -79,9 +100,7 @@ def build_frame_record(
 
     img_name = os.path.basename(rel_img_path)
     dst_img_path = os.path.join(seq_images_dir, img_name)
-
-    if copy_images:
-        shutil.copy2(src_img_path, dst_img_path)
+    link_or_copy(src_img_path, dst_img_path, use_symlink)
 
     transform_matrix = frame_entry.get("transform_matrix")
     if transform_matrix is None:
@@ -93,54 +112,76 @@ def build_frame_record(
         logging.warning("Bad transform_matrix shape in %s", src_img_path)
         return None
 
-    # NeRF-style transforms.json usually stores camera-to-world.
-    # LVSM metadata wants world-to-camera.
+    # NeRF stores camera-to-world; LVSM wants world-to-camera
     w2c = np.linalg.inv(c2w)
 
     return {
-        "image_path": dst_img_path,
+        "image_path": os.path.abspath(dst_img_path),
         "fxfycxcy": [float(fx), float(fy), float(cx), float(cy)],
-        "w2c": w2c.tolist()
+        "w2c": w2c.tolist(),
     }
 
 
-def process_scene(scene_dir: str, output_root: str, copy_images: bool = True) -> Tuple[bool, str]:
+# ---------------------------------------------------------------------------
+# Per-scene processor  (runs in worker processes)
+# ---------------------------------------------------------------------------
+
+def process_scene(
+    scene_dir: str,
+    output_root: str,
+    use_symlink: bool,
+    test_fraction: float,
+    mode: str,           # "lvsm" | "ae" | "both"
+) -> Tuple[bool, str, List[str], List[str]]:
+    """
+    Returns (success, message, train_image_paths, test_image_paths).
+    train/test_image_paths are absolute paths used to build the flat AE lists.
+    """
     try:
         scene_name = os.path.basename(scene_dir.rstrip("/"))
-        split_json_path = os.path.join(scene_dir, "train_test_split_2.json")
         transforms_path = os.path.join(scene_dir, "transforms.json")
+        split_json_path = os.path.join(scene_dir, "train_test_split_2.json")
 
-        if not os.path.isfile(split_json_path):
-            return False, f"{scene_dir}: missing train_test_split_2.json"
         if not os.path.isfile(transforms_path):
-            return False, f"{scene_dir}: missing transforms.json"
+            return False, f"{scene_dir}: missing transforms.json", [], []
 
-        split_info = safe_load_json(split_json_path)
         transforms = safe_load_json(transforms_path)
-
-        train_ids = set(split_info.get("train_ids", []))
-        test_ids = set(split_info.get("test_ids", []))
-
-        fx = float(transforms["fl_x"])
-        fy = float(transforms["fl_y"])
-        cx = float(transforms["cx"])
-        cy = float(transforms["cy"])
-
         frames = transforms.get("frames", [])
-        if not isinstance(frames, list):
-            return False, f"{scene_dir}: transforms.json frames is not a list"
+        if not isinstance(frames, list) or len(frames) == 0:
+            return False, f"{scene_dir}: transforms.json has no frames", [], []
+
+        def get_intrinsic(key, frame=None):
+            if frame and key in frame:
+                return float(frame[key])
+            return float(transforms[key])
+
+        # --- resolve split ---
+        if os.path.isfile(split_json_path):
+            split_info = safe_load_json(split_json_path)
+            train_ids = set(split_info.get("train_ids", []))
+            test_ids = set(split_info.get("test_ids", []))
+        else:
+            all_ids = [
+                parse_frame_id(fe.get("file_path", ""))
+                for fe in frames
+                if parse_frame_id(fe.get("file_path", "")) is not None
+            ]
+            train_ids, test_ids = make_train_test_split(all_ids, test_fraction=test_fraction)
+
+        need_lvsm = mode in ("lvsm", "both")
+
+        # Always need image dirs (both modes write images/symlinks)
+        train_images_dir, train_meta_dir = ensure_split_dirs(output_root, "train")
+        test_images_dir,  test_meta_dir  = ensure_split_dirs(output_root, "test")
+        train_seq_dir = os.path.join(train_images_dir, scene_name)
+        test_seq_dir  = os.path.join(test_images_dir,  scene_name)
+        os.makedirs(train_seq_dir, exist_ok=True)
+        os.makedirs(test_seq_dir,  exist_ok=True)
 
         train_records: List[Dict] = []
-        test_records: List[Dict] = []
-
-        train_images_dir, train_meta_dir = ensure_split_dirs(output_root, "train")
-        test_images_dir, test_meta_dir = ensure_split_dirs(output_root, "test")
-
-        train_seq_images_dir = os.path.join(train_images_dir, scene_name)
-        test_seq_images_dir = os.path.join(test_images_dir, scene_name)
-
-        os.makedirs(train_seq_images_dir, exist_ok=True)
-        os.makedirs(test_seq_images_dir, exist_ok=True)
+        test_records:  List[Dict] = []
+        train_img_paths: List[str] = []
+        test_img_paths:  List[str] = []
 
         for frame_entry in frames:
             rel_img_path = frame_entry.get("file_path")
@@ -152,217 +193,264 @@ def process_scene(scene_dir: str, output_root: str, copy_images: bool = True) ->
                 logging.warning("Could not parse frame id from %s", rel_img_path)
                 continue
 
+            try:
+                fx = get_intrinsic("fl_x", frame_entry)
+                fy = get_intrinsic("fl_y", frame_entry)
+                cx = get_intrinsic("cx",   frame_entry)
+                cy = get_intrinsic("cy",   frame_entry)
+            except (KeyError, TypeError) as e:
+                logging.warning("Missing intrinsics in %s: %s", scene_dir, e)
+                continue
+
             if frame_id in train_ids:
                 record = build_frame_record(
-                    scene_dir=scene_dir,
-                    frame_entry=frame_entry,
-                    fx=fx,
-                    fy=fy,
-                    cx=cx,
-                    cy=cy,
-                    seq_images_dir=train_seq_images_dir,
-                    copy_images=copy_images,
+                    scene_dir, frame_entry, fx, fy, cx, cy,
+                    train_seq_dir, use_symlink,
                 )
                 if record is not None:
                     train_records.append(record)
+                    train_img_paths.append(record["image_path"])
 
             elif frame_id in test_ids:
                 record = build_frame_record(
-                    scene_dir=scene_dir,
-                    frame_entry=frame_entry,
-                    fx=fx,
-                    fy=fy,
-                    cx=cx,
-                    cy=cy,
-                    seq_images_dir=test_seq_images_dir,
-                    copy_images=copy_images,
+                    scene_dir, frame_entry, fx, fy, cx, cy,
+                    test_seq_dir, use_symlink,
                 )
                 if record is not None:
                     test_records.append(record)
+                    test_img_paths.append(record["image_path"])
 
         train_records.sort(key=lambda x: os.path.basename(x["image_path"]))
-        test_records.sort(key=lambda x: os.path.basename(x["image_path"]))
+        test_records.sort( key=lambda x: os.path.basename(x["image_path"]))
+        train_img_paths.sort()
+        test_img_paths.sort()
 
-        if train_records:
-            train_meta = {
-                "scene_name": scene_name,
-                "frames": train_records
-            }
-            with open(os.path.join(train_meta_dir, f"{scene_name}.json"), "w") as f:
-                json.dump(train_meta, f, indent=4)
+        # --- write LVSM per-scene JSON ---
+        if need_lvsm:
+            if train_records:
+                with open(os.path.join(train_meta_dir, f"{scene_name}.json"), "w") as f:
+                    json.dump({"scene_name": scene_name, "frames": train_records}, f, indent=2)
+            if test_records:
+                with open(os.path.join(test_meta_dir, f"{scene_name}.json"), "w") as f:
+                    json.dump({"scene_name": scene_name, "frames": test_records}, f, indent=2)
 
-        if test_records:
-            test_meta = {
-                "scene_name": scene_name,
-                "frames": test_records
-            }
-            with open(os.path.join(test_meta_dir, f"{scene_name}.json"), "w") as f:
-                json.dump(test_meta, f, indent=4)
-
-        return True, scene_dir
+        return True, scene_dir, train_img_paths, test_img_paths
 
     except Exception as e:
-        return False, f"{scene_dir}: {str(e)}"
+        import traceback
+        return False, f"{scene_dir}: {e}\n{traceback.format_exc()}", [], []
 
 
-def process_single_scene(args):
+def _worker(args):
     return process_scene(*args)
 
 
+# ---------------------------------------------------------------------------
+# Dataset-level helpers
+# ---------------------------------------------------------------------------
+
 def find_scene_dirs(base_path: str) -> List[str]:
+    """
+    Accept either the DL3DV-10K root (containing 1K/..10K) or a single subset dir.
+    A valid scene must have transforms.json and images_4/.
+    """
     scene_dirs = []
-    for entry in sorted(os.listdir(base_path)):
-        scene_dir = os.path.join(base_path, entry)
-        if not os.path.isdir(scene_dir):
-            continue
 
-        split_json = os.path.join(scene_dir, "train_test_split_2.json")
-        transforms = os.path.join(scene_dir, "transforms.json")
-        images_dir = os.path.join(scene_dir, "images_4")
+    def _scan(directory: str):
+        try:
+            entries = sorted(os.listdir(directory))
+        except PermissionError:
+            return
+        for entry in entries:
+            sd = os.path.join(directory, entry)
+            if (os.path.isdir(sd)
+                    and os.path.isfile(os.path.join(sd, "transforms.json"))
+                    and os.path.isdir(os.path.join(sd, "images_4"))):
+                scene_dirs.append(sd)
 
-        if os.path.isfile(split_json) and os.path.isfile(transforms) and os.path.isdir(images_dir):
-            scene_dirs.append(scene_dir)
+    entries = sorted(os.listdir(base_path))
+    has_subsets = any(e in SUBSET_NAMES for e in entries)
+
+    if has_subsets:
+        for subset in SUBSET_NAMES:
+            subset_path = os.path.join(base_path, subset)
+            if os.path.isdir(subset_path):
+                logging.info("Scanning subset: %s", subset_path)
+                _scan(subset_path)
+    else:
+        _scan(base_path)
 
     return scene_dirs
 
 
+def write_full_list(meta_dir: str, out_dir: str) -> None:
+    """LVSM full_list.txt — absolute paths to every per-scene JSON."""
+    json_files = sorted(
+        os.path.abspath(os.path.join(meta_dir, f))
+        for f in os.listdir(meta_dir)
+        if f.endswith(".json")
+    )
+    os.makedirs(out_dir, exist_ok=True)
+    with open(os.path.join(out_dir, "full_list.txt"), "w") as f:
+        for p in json_files:
+            f.write(p + "\n")
+
+
+def write_image_list(image_paths: List[str], out_path: str) -> None:
+    """AE flat list — one absolute image path per line."""
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "w") as f:
+        for p in sorted(image_paths):
+            f.write(p + "\n")
+
+
+# ---------------------------------------------------------------------------
+# Main pipeline
+# ---------------------------------------------------------------------------
+
 def process_dataset_root(
     base_path: str,
     output_root: str,
-    num_processes: Optional[int] = None,
-    chunk_size: int = 1,
-    copy_images: bool = True,
+    num_processes: int,
+    chunk_size: int,
+    use_symlink: bool,
+    test_fraction: float,
+    mode: str,
 ) -> None:
     scene_dirs = find_scene_dirs(base_path)
-    total_scenes = len(scene_dirs)
-    logging.info("Found %d scene directories in %s", total_scenes, base_path)
+    total = len(scene_dirs)
+    logging.info("Found %d scene directories", total)
 
-    if total_scenes == 0:
+    if total == 0:
         logging.warning("No valid scene directories found in %s", base_path)
         return
 
-    if num_processes is None:
-        num_processes = max(1, mp.cpu_count() - 1)
+    worker_args = [
+        (sd, output_root, use_symlink, test_fraction, mode)
+        for sd in scene_dirs
+    ]
 
-    args = [(scene_dir, output_root, copy_images) for scene_dir in scene_dirs]
-
-    start_time = time.time()
+    start = time.time()
     with mp.Pool(num_processes) as pool:
         results = list(
             tqdm(
-                pool.imap(process_single_scene, args, chunksize=chunk_size),
-                total=total_scenes,
-                desc=f"Processing scenes with {num_processes} processes"
+                pool.imap(_worker, worker_args, chunksize=chunk_size),
+                total=total,
+                desc=f"Processing ({num_processes} workers, mode={mode})",
             )
         )
 
-    successful = sum(1 for success, _ in results if success)
-    failed = [(success, msg) for success, msg in results if not success]
-
-    elapsed_time = time.time() - start_time
-    logging.info("Processing completed in %.2f seconds", elapsed_time)
-    logging.info("Successfully processed %d/%d scenes", successful, total_scenes)
+    ok_count = sum(1 for r in results if r[0])
+    failed   = [r for r in results if not r[0]]
+    logging.info("Done in %.1f s — %d/%d scenes OK", time.time() - start, ok_count, total)
 
     if failed:
-        logging.warning("Failed to process %d scenes:", len(failed))
-        for _, msg in failed:
-            logging.warning("  - %s", msg)
+        logging.warning("%d scenes failed:", len(failed))
+        for r in failed:
+            logging.warning("  %s", r[1])
 
-    for split in ["train", "test"]:
-        meta_dir = os.path.join(output_root, split, "metadata")
-        save_dir = os.path.join(output_root, split)
-        if os.path.isdir(meta_dir):
-            generate_full_list(meta_dir, save_dir)
-            logging.info("Generated full_list.txt for %s", split)
+    # Collect all image paths from successful scenes
+    all_train_imgs = [p for r in results if r[0] for p in r[2]]
+    all_test_imgs  = [p for r in results if r[0] for p in r[3]]
 
+    need_lvsm = mode in ("lvsm", "both")
+    need_ae   = mode in ("ae",   "both")
+
+    # --- LVSM outputs ---
+    if need_lvsm:
+        for split in ("train", "test"):
+            meta_dir = os.path.join(output_root, split, "metadata")
+            if os.path.isdir(meta_dir):
+                write_full_list(meta_dir, os.path.join(output_root, split))
+                logging.info(
+                    "Wrote LVSM full_list.txt  ->  %s/%s/full_list.txt",
+                    output_root, split,
+                )
+
+    # --- AE outputs ---
+    if need_ae:
+        ae_dir = os.path.join(output_root, "ae")
+        train_list = os.path.join(ae_dir, "train_image_list.txt")
+        test_list  = os.path.join(ae_dir, "test_image_list.txt")
+
+        write_image_list(all_train_imgs, train_list)
+        write_image_list(all_test_imgs,  test_list)
+
+        logging.info(
+            "Wrote AE image lists ->  %s  (%d train / %d test images)",
+            ae_dir, len(all_train_imgs), len(all_test_imgs),
+        )
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--base_path",
-        type=str,
-        required=True,
-        help="Path to one DL3DV subset directory, e.g. /work/hdd/bdxf/dl3dv/DL3DV-10K/4K"
+    parser = argparse.ArgumentParser(
+        description=(
+            "Preprocess DL3DV-10K into LVSM and/or AE format.\n\n"
+            "Modes:\n"
+            "  lvsm  ->  per-scene JSON + full_list.txt  (for LVSM training)\n"
+            "  ae    ->  flat image_list.txt              (for autoencoder training)\n"
+            "  both  ->  both outputs in one pass         (recommended)\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--output_dir",
-        type=str,
-        required=True,
-        help="Output directory root"
+        "--base_path", required=True,
+        help=(
+            "DL3DV-10K root containing 1K/.../10K subdirs, "
+            "OR a single subset dir (e.g. .../DL3DV-10K/4K)"
+        ),
     )
     parser.add_argument(
-        "--chunk_size",
-        type=int,
-        default=10
+        "--output_dir", required=True,
+        help="Root output directory",
     )
     parser.add_argument(
-        "--num_processes",
-        type=int,
-        default=32
+        "--mode", choices=["lvsm", "ae", "both"], default="both",
+        help="What to output (default: both)",
+    )
+    parser.add_argument("--num_processes", type=int, default=32)
+    parser.add_argument("--chunk_size",    type=int, default=10)
+    parser.add_argument(
+        "--symlink_images", action="store_true",
+        help=(
+            "Symlink images instead of copying. "
+            "STRONGLY recommended — avoids duplicating terabytes of image data."
+        ),
     )
     parser.add_argument(
-        "--symlink_images",
-        action="store_true",
-        help="Use symlinks instead of copying images"
+        "--test_fraction", type=float, default=0.1,
+        help="Fraction of frames held out as test when no split JSON exists (default: 0.1)",
     )
 
     args = parser.parse_args()
 
-    copy_images = not args.symlink_images
+    logging.info("=" * 60)
+    logging.info("DL3DV-10K preprocessing")
+    logging.info("  base_path     : %s", args.base_path)
+    logging.info("  output_dir    : %s", args.output_dir)
+    logging.info("  mode          : %s", args.mode)
+    logging.info("  num_processes : %d", args.num_processes)
+    logging.info("  symlink_images: %s", args.symlink_images)
+    logging.info("  test_fraction : %.2f", args.test_fraction)
+    logging.info("=" * 60)
 
-    if args.symlink_images:
-        # Swap behavior if you want symlinks instead of copies
-        def build_frame_record_symlink(
-            scene_dir: str,
-            frame_entry: Dict,
-            fx: float,
-            fy: float,
-            cx: float,
-            cy: float,
-            seq_images_dir: str,
-            copy_images: bool,
-        ) -> Optional[Dict]:
-            rel_img_path = frame_entry.get("file_path")
-            if rel_img_path is None:
-                return None
+    if not args.symlink_images:
+        logging.warning(
+            "WARNING: --symlink_images not set. Images will be COPIED, "
+            "duplicating all data. Pass --symlink_images to avoid this."
+        )
 
-            src_img_path = os.path.join(scene_dir, rel_img_path)
-            if not os.path.isfile(src_img_path):
-                logging.warning("Missing image file: %s", src_img_path)
-                return None
-
-            img_name = os.path.basename(rel_img_path)
-            dst_img_path = os.path.join(seq_images_dir, img_name)
-
-            if not os.path.exists(dst_img_path):
-                os.symlink(src_img_path, dst_img_path)
-
-            transform_matrix = frame_entry.get("transform_matrix")
-            if transform_matrix is None:
-                logging.warning("Missing transform_matrix for %s", src_img_path)
-                return None
-
-            c2w = np.array(transform_matrix, dtype=np.float32)
-            if c2w.shape != (4, 4):
-                logging.warning("Bad transform_matrix shape in %s", src_img_path)
-                return None
-
-            w2c = np.linalg.inv(c2w)
-
-            return {
-                "image_path": dst_img_path,
-                "fxfycxcy": [float(fx), float(fy), float(cx), float(cy)],
-                "w2c": w2c.tolist()
-            }
-
-        build_frame_record = build_frame_record_symlink  # type: ignore
-
-    logging.info("Starting DL3DV-10K processing...")
     process_dataset_root(
         base_path=args.base_path,
         output_root=args.output_dir,
         num_processes=args.num_processes,
         chunk_size=args.chunk_size,
-        copy_images=copy_images,
+        use_symlink=args.symlink_images,
+        test_fraction=args.test_fraction,
+        mode=args.mode,
     )
-    logging.info("Processing completed.")
+    logging.info("All done.")

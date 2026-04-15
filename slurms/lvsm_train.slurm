@@ -36,4 +36,4 @@ export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:256"
     --rdzv_id 42001 \
     --rdzv_backend c10d \
     --rdzv_endpoint localhost:29510 \
-    scripts/train.py --config configs/LVSM_scene_decoder_only_dl3dv.yaml
+    scripts/train.py --config /u/nstjohn/LVSM/configs/LVSM_scene_decoder_ae.yaml

@@ -29,8 +29,9 @@ export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-6}"
 export NCCL_DEBUG=WARN
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:256"
 
-srun python /u/nstjohn/LVSM/process_dataDL3DV-10k.py \
-    --base_path /work/hdd/bdxf/dl3dv/DL3DV-10K/4K \
-    --output_dir /work/hdd/bdxf/nstjohn/LVSM/test1 \
-    --num_processes 6 \
-    --chunk_size 1
+srun python /u/nstjohn/LVSM/scripts/process_dataDL3DV-10k.py \
+    --base_path /work/hdd/bdxf/dl3dv/DL3DV-10K \
+    --output_dir /work/nvme/bdxf/nstjohn/dl3dv_processed \
+    --mode both \
+    --num_processes 32 \
+    --symlink_images
