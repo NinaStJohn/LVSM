@@ -1,0 +1,68 @@
+# configs/autoencoder/dl3dv_ae.yaml
+# Autoencoder (KL-16) training config for DL3DV-10K at 256x256.
+
+model:
+  class_name: model.ae_modules.autoencoder_vae.AutoencoderKL
+  params:
+    embed_dim: 16
+    ddconfig:
+      double_z: true
+      z_channels: 16
+      resolution: 256          # training resolution (square crop)
+      in_channels: 3
+      out_ch: 3
+      ch: 128                  # bumped from 64 — gives better reconstruction at 256
+      ch_mult: [1, 2, 4]       # 3 levels -> 4x spatial downsampling (256 -> 64 latent)
+      num_res_blocks: 2        # bumped from 1 for better capacity
+      attn_resolutions: []     # fully conv — handles any resolution at inference
+      attn_type: "vanilla"     # use vanilla (softmax) attention if attn_resolutions non-empty
+      dropout: 0.0
+    lossconfig:
+      disc_start: 50001        # train AE alone first, then add discriminator
+      kl_weight: 0.000001
+      disc_weight: 0.5
+      perceptual_weight: 1.0
+      disc_num_layers: 3
+      disc_in_channels: 3
+      disc_ndf: 64
+      disc_loss: "hinge"
+
+training:
+  # --- data ---
+  dataset_path: /work/nvme/bdxf/nstjohn/dl3dv_processed/ae/train_image_list.txt
+  val_dataset_path: /work/nvme/bdxf/nstjohn/dl3dv_processed/ae/test_image_list.txt
+  image_size: 256
+  random_flip: false
+
+  # --- optimisation ---
+  train_steps: 300000
+  batch_size_per_gpu: 8
+  grad_accum_steps: 1
+  lr: 4.5e-6                   # per LDM paper; scaled by batch below in train script
+  weight_decay: 0.0
+  beta1: 0.5                   # Adam betas for GAN training (not 0.9/0.95)
+  beta2: 0.9
+  warmup: 1000
+  grad_clip_norm: 1.0
+
+  # --- precision ---
+  use_amp: true
+  amp_dtype: bf16
+  use_tf32: true
+
+  # --- logging / checkpointing ---
+  print_every: 100
+  vis_every: 1000
+  checkpoint_every: 5000
+  checkpoint_dir: experiments/checkpoints/AE_dl3dv
+  wandb_project: LVSM-AE
+  wandb_exp_name: ae_dl3dv_kl16_256
+  api_key_path: configs/api_keys/api_keys.yaml
+
+  # --- dataloader ---
+  num_workers: 4
+  prefetch_factor: 4
+
+# inference block (required by some utils — leave as-is)
+inference:
+  if_inference: false
