@@ -31,7 +31,8 @@ export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:256"
 
 srun python /u/nstjohn/LVSM/scripts/process_dataDL3DV-10k.py \
     --base_path /work/hdd/bdxf/dl3dv/DL3DV-10K \
-    --output_dir /work/nvme/bdxf/nstjohn/dl3dv_processed \
+    --output_dir /work/hdd/bdxf/nstjohn/dl3dv_processed \
     --mode both \
     --num_processes 32 \
     --symlink_images
+
