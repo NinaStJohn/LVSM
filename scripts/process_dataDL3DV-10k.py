@@ -255,6 +255,7 @@ def find_scene_dirs(base_path: str) -> List[str]:
     A valid scene must have transforms.json and images_4/.
     """
     scene_dirs = []
+    EXCLUDED_DIRS = {"bad_scenes"}
 
     def _scan(directory: str):
         try:
@@ -272,8 +273,10 @@ def find_scene_dirs(base_path: str) -> List[str]:
     has_subsets = any(e in SUBSET_NAMES for e in entries)
 
     if has_subsets:
-        for subset in SUBSET_NAMES:
-            subset_path = os.path.join(base_path, subset)
+        for entry in entries:
+            if entry in EXCLUDED_DIRS or entry not in SUBSET_NAMES:
+                continue
+            subset_path = os.path.join(base_path, entry)
             if os.path.isdir(subset_path):
                 logging.info("Scanning subset: %s", subset_path)
                 _scan(subset_path)
