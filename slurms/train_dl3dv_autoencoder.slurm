@@ -33,8 +33,8 @@ export NCCL_DEBUG=WARN
 torchrun \
     --nproc_per_node 4 \
     --nnodes 1 \
-    --rdzv_id 42100 \
+    --rdzv_id $SLURM_JOB_ID \
     --rdzv_backend c10d \
     --rdzv_endpoint localhost:29520 \
-    scripts/train_ae.py \
-    --config configs/autoencoder/dl3dv_ae.yaml
+    /u/nstjohn/LVSM/scripts/train_ae.py \
+    --config /u/nstjohn/LVSM/configs/autoencoder/dl3vd_autoencoder.yaml

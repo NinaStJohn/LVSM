@@ -2,7 +2,7 @@
 # Autoencoder (KL-16) training config for DL3DV-10K at 256x256.
 
 model:
-  class_name: model.ae_modules.autoencoder_vae.AutoencoderKL
+  class_name: model.autoencoder_vae.AutoencoderKL
   params:
     embed_dim: 16
     ddconfig:
@@ -29,8 +29,9 @@ model:
 
 training:
   # --- data ---
-  dataset_path: /work/nvme/bdxf/nstjohn/dl3dv_processed/ae/train_image_list.txt
-  val_dataset_path: /work/nvme/bdxf/nstjohn/dl3dv_processed/ae/test_image_list.txt
+  use_wandb: false
+  dataset_path: /work/hdd/bdxf/nstjohn/dl3dv_processed/ae/train_image_list.txt
+  val_dataset_path: /work/hdd/bdxf/nstjohn/dl3dv_processed/ae/test_image_list.txt
   image_size: 256
   random_flip: false
 
@@ -54,10 +55,10 @@ training:
   print_every: 100
   vis_every: 1000
   checkpoint_every: 5000
-  checkpoint_dir: experiments/checkpoints/AE_dl3dv
+  checkpoint_dir: /work/hdd/bdxf/nstjohn/LVSM/autoencoder
   wandb_project: LVSM-AE
   wandb_exp_name: ae_dl3dv_kl16_256
-  api_key_path: configs/api_keys/api_keys.yaml
+  api_key_path: /u/nstjohn/LVSM/configs/api_keys/api_keys.yaml
 
   # --- dataloader ---
   num_workers: 4

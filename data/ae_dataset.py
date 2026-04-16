@@ -29,15 +29,9 @@ class AEDataset(Dataset):
 
         list_path = config.training.dataset_path
         with open(list_path, "r") as f:
-            paths = [l.strip() for l in f if l.strip()]
+            self.image_paths = [l.strip() for l in f if l.strip()]
 
-        # Filter to only existing files (guards against stale symlinks)
-        self.image_paths = [p for p in paths if os.path.isfile(p)]
-        missing = len(paths) - len(self.image_paths)
-        if missing > 0:
-            print(f"[AEDataset] WARNING: {missing} paths missing/broken, skipping them.")
-
-        print(f"[AEDataset] {len(self.image_paths)} images loaded from {list_path}")
+        print(f"[AEDataset] {len(self.image_paths)} images from {list_path}")
 
     def __len__(self):
         return len(self.image_paths)
@@ -53,7 +47,7 @@ class AEDataset(Dataset):
         path = self.image_paths[idx]
         image = PIL.Image.open(path).convert("RGB")
 
-        # Square crop from centre, then resize
+        # Square centre crop then resize
         w, h = image.size
         min_side = min(w, h)
         left  = (w - min_side) // 2
