@@ -23,7 +23,7 @@ echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 nvidia-smi
 
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-16}"
-export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:256"
+export PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:256"
 export NCCL_DEBUG=WARN
 
 # Optional: resume from latest checkpoint

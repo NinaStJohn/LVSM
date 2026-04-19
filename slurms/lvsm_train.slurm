@@ -13,7 +13,7 @@
 
 set -euo pipefail
 mkdir -p sout
-mkdir -p experiments/checkpoints/LVSM_dl3dv
+mkdir -p /work/hdd/bdxf/nstjohn/LVSM/experiments/smoke_test
 
 source /u/$USER/miniconda3/etc/profile.d/conda.sh
 conda activate /work/nvme/bdxf/nstjohn/conda_envs/LVSM
@@ -36,4 +36,5 @@ export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:256"
     --rdzv_id 42001 \
     --rdzv_backend c10d \
     --rdzv_endpoint localhost:29510 \
-    scripts/train.py --config /u/nstjohn/LVSM/configs/LVSM_scene_decoder_ae.yaml
+    /u/nstjohn/LVSM/scripts/train.py \
+    --config /u/nstjohn/LVSM/configs/LVSM/LVSM_scene_decoder_ae.yaml
