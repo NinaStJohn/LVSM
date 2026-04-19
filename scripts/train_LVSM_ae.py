@@ -18,6 +18,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.metric_utils import visualize_intermediate_results
 
+from ldm.util import instantiate_from_config
+
 # Load config and read(override) arguments from CLI
 config = init_config()
 
