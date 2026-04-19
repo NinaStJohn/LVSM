@@ -28,7 +28,7 @@ ddp_info = init_distributed(seed=777)
 dist.barrier()
 
 # Set up wandb and backup source code
-if ddp_info.is_main_process:
+if ddp_info.is_main_process and config.training.get("use_wandb", True):
     init_wandb_and_backup(config)
 dist.barrier()
 
@@ -207,24 +207,26 @@ while cur_train_step <= total_train_steps:
         lr_scheduler.step()
         optimizer.zero_grad(set_to_none=True)
 
-    # log and save checkpoint
+# log and save checkpoint
     if ddp_info.is_main_process:
         loss_dict = {k: float(f"{v.item():.6f}") for k, v in ret_dict.loss_metrics.items()}
         # print in console
         if (cur_train_step % config.training.print_every == 0) or (cur_train_step < 100 + start_train_step):
-            print_str = f"[Epoch {int(cur_epoch):>3d}] | Forwad step: {int(cur_train_step):>6d} (Param update step: {int(cur_param_update_step):>6d})"
-            print_str += f" | Iter Time: {time.time() - tic:.2f}s | LR: {optimizer.param_groups[0]['lr']:.6f}\n"
-            # Add loss values
+            print_str = f"[Epoch {int(cur_epoch):>3d}] | Forward step: {int(cur_train_step):>6d} (Param update step: {int(cur_param_update_step):>6d})"
+            print_str += f" | Iter Time: {time.time() - tic:.2f}s | LR: {optimizer.param_groups[0]['lr']:.6f}"
+            print_str += f" | GradNorm: {total_grad_norm:.4f}" if total_grad_norm is not None else " | GradNorm: N/A"
+            print_str += "\n"
             for k, v in loss_dict.items():
                 print_str += f"{k}: {v:.6f} | "
             print(print_str)
 
         # log in wandb
-        if (cur_train_step % config.training.wandb_log_every == 0) or (
-            cur_train_step < 200 + start_train_step
+        if config.training.get("use_wandb", True) and (
+            (cur_train_step % config.training.wandb_log_every == 0) or
+            (cur_train_step < 200 + start_train_step)
         ):
             log_dict = {
-                "iter": cur_train_step, 
+                "iter": cur_train_step,
                 "forward_pass_step": cur_train_step,
                 "param_update_step": cur_param_update_step,
                 "lr": optimizer.param_groups[0]["lr"],
@@ -255,7 +257,7 @@ while cur_train_step <= total_train_steps:
             ckpt_path = os.path.join(config.training.checkpoint_dir, f"ckpt_{cur_train_step:016}.pt")
             torch.save(checkpoint, ckpt_path)
             print(f"Saved checkpoint at step {cur_train_step} to {os.path.abspath(ckpt_path)}")
-        
+
         # export intermediate visualization results
         if export_inter_results:
             vis_path = os.path.join(config.training.checkpoint_dir, f"iter_{cur_train_step:08d}")

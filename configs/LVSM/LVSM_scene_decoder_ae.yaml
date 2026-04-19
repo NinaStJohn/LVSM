@@ -1,5 +1,7 @@
+output_dir: /work/hdd/bdxf/nstjohn/LVSM/experiments/smoke_test
+
 model:
-  class_name: model.LVSM_scene_decoder_only.Images2LatentScene
+  class_name: model.LVSM_scene_encoder_decoder.Images2LatentScene
 
   image_tokenizer:
     image_size: 256
@@ -60,7 +62,7 @@ training:
   allowed_gradnorm_factor: 5
   square_crop: true
   scene_scale_factor: 1.35
-  checkpoint_dir: /work/hdd/bdxf/nstjohn/LVSM/test/
+  checkpoint_dir: ${output_dir}/checkpoints
   checkpoint_every: 500
   dataset_name: data.dataset_scene.Dataset
   dataset_path: /work/hdd/bdxf/nstjohn/dl3dv_processed/test/full_list.txt
@@ -101,7 +103,7 @@ training:
   # print_every: 100
   # vis_every: 1000
   # checkpoint_every: 5000
-  # checkpoint_dir: /work/hdd/bdxf/nstjohn/LVSM/experiments/smoke_test/checkpoints
+  # checkpoint_dir: ${output_dir}/checkpoints
   # wandb_project: LVSM-AE
   # wandb_exp_name: ae_dl3dv_kl16_256
   # api_key_path: /u/nstjohn/LVSM/configs/api_keys/api_keys.yaml

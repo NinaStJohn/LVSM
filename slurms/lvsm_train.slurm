@@ -37,4 +37,5 @@ export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:256"
     --rdzv_backend c10d \
     --rdzv_endpoint localhost:29510 \
     /u/nstjohn/LVSM/scripts/train.py \
-    --config /u/nstjohn/LVSM/configs/LVSM/LVSM_scene_decoder_ae.yaml
+    --config /u/nstjohn/LVSM/configs/LVSM/LVSM_scene_decoder_ae.yaml \
+    output_dir=/work/hdd/bdxf/nstjohn/LVSM/experiments/smoke_test
