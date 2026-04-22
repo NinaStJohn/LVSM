@@ -55,7 +55,7 @@ training:
   use_wandb: false
 
   amp_dtype: bf16
-  api_key_path: ./configs/api_keys.yaml
+  api_key_path: /u/nstjohn/LVSM/configs/api_keys/api_keys.yaml
   batch_size_per_gpu: 8
   beta1: 0.9
   beta2: 0.95
