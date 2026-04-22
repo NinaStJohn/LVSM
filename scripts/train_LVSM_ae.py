@@ -1,4 +1,6 @@
-# Copyright (c) 2025 Haian Jin. Created for the LVSM project (ICLR 2025).
+'''
+This code is going to be where we inject the autoencoder into the LVSM training
+'''
 
 import importlib
 import os
