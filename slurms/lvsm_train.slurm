@@ -28,7 +28,7 @@ nvidia-smi
 
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
 export NCCL_DEBUG=WARN
-export PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:256"
+export PYTORCH_CUDA_ALLOC_CONF=""
 
 /work/nvme/bdxf/nstjohn/conda_envs/LVSM/bin/torchrun \
     --nproc_per_node 4 \
