@@ -1,0 +1,111 @@
+output_dir: /work/hdd/bdxf/nstjohn/LVSM/experiments/smoke_test
+
+model:
+  class_name: model.LVSM_scene_encoder_decoder.Images2LatentScene
+
+  image_tokenizer:
+    image_size: 256
+    patch_size: 8
+    in_channels: 9  # 3 RGB + 3 direction + 3 Reference
+
+  target_pose_tokenizer:
+    image_size: 256
+    patch_size: 8
+    in_channels: 6  # 3 direction + 3 Reference
+
+  transformer:
+    d: 768
+    d_head: 64
+    encoder_n_layer: 12
+    decoder_n_layer: 12
+    special_init: true
+    depth_init: true
+    use_qk_norm: true
+    n_latent_vectors: 3072
+
+  first_stage_config:
+    target: model.autoencoder_vae.AutoencoderKL
+    params:
+      ckpt_path: /work/hdd/bdxf/nstjohn/LVSM/autoencoder/checkpoints/latest.pt
+      monitor: val/rec_loss
+    embed_dim: 16
+    ddconfig:
+      double_z: true
+      z_channels: 16
+      resolution: 256
+      in_channels: 3
+      out_ch: 3
+      ch: 128
+      ch_mult: [1, 2, 4]
+      num_res_blocks: 2
+      attn_resolutions: []
+      attn_type: "vanilla"
+      dropout: 0.0
+    lossconfig:
+      disc_start: 50001
+      kl_weight: 0.000001
+      disc_weight: 0.5
+      perceptual_weight: 1.0
+      disc_num_layers: 3
+      disc_in_channels: 3
+      disc_ndf: 64
+      disc_loss: "hinge"
+
+training:
+  use_wandb: false
+
+  amp_dtype: bf16
+  api_key_path: /u/nstjohn/LVSM/configs/api_keys/api_keys.yaml
+  batch_size_per_gpu: 4
+  beta1: 0.9
+  beta2: 0.95
+  allowed_gradnorm_factor: 5
+  square_crop: true
+  scene_scale_factor: 1.35
+  checkpoint_dir: /work/hdd/bdxf/nstjohn/LVSM/experiments/smoke_test/checkpoints
+  checkpoint_every: 500
+  dataset_name: data.dataset_scene.Dataset
+  dataset_path: /work/hdd/bdxf/nstjohn/dl3dv_processed/test/full_list.txt
+  grad_accum_steps: 1
+  grad_checkpoint_every: 1
+  grad_clip_norm: 1.0
+
+  l2_loss_weight: 1.0
+  lpips_loss_weight: 0.0
+  perceptual_loss_weight: 0.5
+
+  lr: 0.0004
+  train_steps: 1000
+
+  num_input_views: 2
+  num_target_views: 3
+  num_threads: 8
+  num_views: 5
+  num_workers: 4
+  prefetch_factor: 4
+  print_every: 10
+
+  target_has_input: false
+  use_amp: true
+  use_rel_pose: false
+  use_tf32: true
+  view_selector:
+    max_frame_dist: 192
+    min_frame_dist: 25
+  vis_every: 100
+  wandb_exp_name: LVSM_dl3dv_smoketest_inference
+  wandb_project: LVSM
+  wandb_log_every: 10
+  warmup: 100
+  weight_decay: 0.05
+
+inference:
+  if_inference: true
+  compute_metrics: true
+  view_idx_file_path: /u/nstjohn/LVSM/data/evaluation_index_re10k.json
+  render_video: true
+  render_video_config:
+    traj_type: interpolate
+    num_frames: 60
+    loop_video: true
+    order_poses: false
