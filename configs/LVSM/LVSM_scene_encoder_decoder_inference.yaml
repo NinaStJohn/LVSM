@@ -72,6 +72,24 @@ training:
   lpips_loss_weight: 0.0
   l2_loss_weight: 1.0
   perceptual_loss_weight: 0.5
+  grad_checkpoint_every: 1
+  grad_accum_steps: 1
+  grad_clip_norm: 1.0
+  center_crop: false
+  beta1: 0.9
+  beta2: 0.95
+  allowed_gradnorm_factor: 5
+  warmup: 100
+  weight_decay: 0.05
+  lr: 0.0004
+  train_steps: 1000
+  print_every: 10
+  vis_every: 100
+  checkpoint_every: 500
+  wandb_exp_name: inference
+  wandb_project: LVSM
+  wandb_log_every: 10
+  use_wandb: false
   view_selector:
     max_frame_dist: 192
     min_frame_dist: 25
