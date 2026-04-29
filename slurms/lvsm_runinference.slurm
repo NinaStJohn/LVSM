@@ -6,7 +6,7 @@
 #SBATCH --ntasks=4
 #SBATCH --gpus-per-task=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=128G
+#SBATCH --mem=32G
 #SBATCH --time=02:00:00
 #SBATCH -o sout/%x-%j.out
 #SBATCH -e sout/%x-%j.err
