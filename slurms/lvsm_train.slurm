@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=lvsm_dl3dv_smoke
+#SBATCH --job-name=lvsm_dl3dv_ae1
 #SBATCH --account=bdxf-delta-gpu
 #SBATCH --partition=gpuA100x4
 #SBATCH --nodes=1
@@ -36,6 +36,6 @@ export PYTORCH_CUDA_ALLOC_CONF=""
     --rdzv_id 42001 \
     --rdzv_backend c10d \
     --rdzv_endpoint localhost:29510 \
-    /u/nstjohn/LVSM/scripts/train.py \
-    --config /u/nstjohn/LVSM/configs/LVSM/LVSM_scene_decoder_ae.yaml \
-    output_dir=/work/hdd/bdxf/nstjohn/LVSM/experiments/smoke_test
+    /u/nstjohn/LVSM/scripts/train_LVSM_ae.py \
+    --config /u/nstjohn/LVSM/configs/LVSM/LVSM_scene_encoder_decoder_ae.yaml \
+    output_dir=/work/hdd/bdxf/nstjohn/LVSM/experiments/ae_test1

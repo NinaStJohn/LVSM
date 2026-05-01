@@ -10,6 +10,7 @@ import traceback
 from utils import camera_utils, data_utils
 from .transformer import QK_Norm_TransformerBlock, init_weights
 from .loss import LossComputer
+from ldm.util import instantiate_from_config
 
 
 class Images2LatentScene(nn.Module):
@@ -24,8 +25,12 @@ class Images2LatentScene(nn.Module):
         # Initialize transformer blocks
         self._init_transformer()
         
+        # autoencoderrrr
+        self._init_first_stage()
+
         # Initialize loss computer
         self.loss_computer = LossComputer(config)
+
 
     def _create_tokenizer(self, in_channels, patch_size, d_model):
         """Helper function to create a tokenizer with given config"""
@@ -66,7 +71,7 @@ class Images2LatentScene(nn.Module):
             nn.LayerNorm(self.config.model.transformer.d, bias=False),
             nn.Linear(
                 self.config.model.transformer.d,
-                (self.config.model.target_pose_tokenizer.patch_size**2) * 3,
+                (self.config.model.target_pose_tokenizer.patch_size**2) * self.config.model.first_stage_config.ddconfig.z_channels,      # 3 -> z_channels
                 bias=False,
             ),
             nn.Sigmoid()
@@ -132,11 +137,20 @@ class Images2LatentScene(nn.Module):
         self.transformer_decoder = nn.ModuleList(self.transformer_decoder)
         self.transformer_input_layernorm_decoder = nn.LayerNorm(config.d, bias=False)
 
+    # instaciate the autoencoder'
+    # grad_false - advoid extra training
+    def _init_first_stage(self):
+        model = instantiate_from_config(self.config.model.first_stage_config)
+        model.eval()
+        for param in model.parameters():
+            param.requires_grad = False
+        self.first_stage_model = model
 
     def train(self, mode=True):
         """Override the train method to keep the loss computer in eval mode"""
         super().train(mode)
         self.loss_computer.eval()
+        self.first_stage_model.eval()
 
 
     
@@ -215,7 +229,8 @@ class Images2LatentScene(nn.Module):
         if images is None:
             return pose_cond
         else:
-            return torch.cat([images * 2.0 - 1.0, pose_cond], dim=2)
+            # return torch.cat([images * 2.0 - 1.0, pose_cond], dim=2)
+            return torch.cat([images, pose_cond], dim=2) # this normalization assumes pixel space - remove
     
     
     def forward(self, data_batch, has_target_image=True):
@@ -223,7 +238,15 @@ class Images2LatentScene(nn.Module):
         input, target = self.process_data(data_batch, has_target_image=has_target_image, target_has_input = self.config.training.target_has_input, compute_rays=True)
         checkpoint_every = self.config.training.grad_checkpoint_every
         n_latent_vectors = self.config.model.transformer.n_latent_vectors
-        # Process input images
+
+        # autoencode the images before processing themmmmmmmm 
+        with torch.no_grad():
+            b, v, c, h, w = input.image.shape
+            input.image = self.first_stage_model.encode(
+                input.image.view(b*v, c, h, w)
+            ).sample().view(b, v, 16, h//4, w//4)
+
+        # Process input images - encodered
         posed_input_images = self.get_posed_input(
             images=input.image, ray_o=input.ray_o, ray_d=input.ray_d
         )
@@ -244,7 +267,7 @@ class Images2LatentScene(nn.Module):
             [self.config.model.transformer.n_latent_vectors, v_input * n_patches], dim=1
         ) # [b, n_latent_vectors, d], [b, v*n_patches, d]
                 
-        
+
         target_pose_cond= self.get_posed_input(ray_o=target.ray_o, ray_d=target.ray_d)
         b, v_target, c, h, w = target_pose_cond.size()
         repeated_latent_tokens = repeat(
@@ -277,8 +300,15 @@ class Images2LatentScene(nn.Module):
             w=width // patch_size, 
             p1=patch_size, 
             p2=patch_size, 
-            c=3
+            c=16                    # update for ae
         )
+        # autoencoderr decode: [b, v, 16, h, w] -> [b, v, 3, H, W] - we need to reshae
+        with torch.no_grad():
+            bv = rendered_images.shape[0] * rendered_images.shape[1]
+            rendered_images = self.first_stage_model.decode(
+                rendered_images.view(bv, 16, rendered_images.shape[3], rendered_images.shape[4])
+            ).view(rendered_images.shape[0], v_target, 3, height, width)
+
         if has_target_image:
             loss_metrics = self.loss_computer(
                 rendered_images,
@@ -318,6 +348,15 @@ class Images2LatentScene(nn.Module):
             data_batch = edict(input=input, target=target)
         else:
             input, target = data_batch.input, data_batch.target
+
+        # autoencode le images
+        # autoencode the images before processing themmmmmmmm 
+        with torch.no_grad():
+            b, v, c, h, w = input.image.shape
+            input.image = self.first_stage_model.encode(
+                input.image.view(b*v, c, h, w)
+            ).sample().view(b, v, 16, h//4, w//4)
+
         
         # Prepare input tokens; [b, v, 3+6, h, w]
         posed_images = self.get_posed_input(
@@ -438,10 +477,18 @@ class Images2LatentScene(nn.Module):
                 w=width // patch_size, 
                 p1=patch_size, 
                 p2=patch_size, 
-                c=3
-            ).cpu()
+                c=16                # ae changeee
+            )
+
+            # autodeocer decode per chunk
+            bv = video_rendering.shape[0] * video_rendering.shape[1]
+            video_rendering = self.first_stage_model.decode(
+                video_rendering.view(bv, 16, video_rendering.shape[3], video_rendering.shape[4])
+            ).view(video_rendering.shape[0], cur_view_chunk_size, 3, height, width).cpu()
 
             video_rendering_list.append(video_rendering)
+
+
 
         # Combine all chunks
         video_rendering = torch.cat(video_rendering_list, dim=1)

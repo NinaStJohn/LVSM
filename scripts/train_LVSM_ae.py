@@ -81,6 +81,7 @@ LVSM = importlib.import_module(module).__dict__[class_name]
 model = LVSM(config).to(ddp_info.device)
 model = DDP(model, device_ids=[ddp_info.local_rank])
 
+# Autoencoder injection point
 
 optimizer, optimized_param_dict, all_param_dict = create_optimizer(
     model,

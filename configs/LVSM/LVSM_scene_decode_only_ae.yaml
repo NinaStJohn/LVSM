@@ -6,7 +6,8 @@ model:
   image_tokenizer:
     image_size: 256
     patch_size: 8
-    in_channels: 9  # 3 RGB + 3 direction + 3 Reference
+    in_channels: 22  # z_channels: 16 => 16 z + 3 dir + 3 ref
+                     # old 3 RGB + 3 direction + 3 Reference
 
   target_pose_tokenizer:
     image_size: 256
