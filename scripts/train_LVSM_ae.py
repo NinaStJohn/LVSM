@@ -20,8 +20,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.metric_utils import visualize_intermediate_results
 
-from ldm.util import instantiate_from_config
-
 # Load config and read(override) arguments from CLI
 config = init_config()
 
@@ -80,8 +78,6 @@ module, class_name = config.model.class_name.rsplit(".", 1)
 LVSM = importlib.import_module(module).__dict__[class_name]
 model = LVSM(config).to(ddp_info.device)
 model = DDP(model, device_ids=[ddp_info.local_rank])
-
-# Autoencoder injection point
 
 optimizer, optimized_param_dict, all_param_dict = create_optimizer(
     model,

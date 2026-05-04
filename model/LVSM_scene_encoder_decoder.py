@@ -10,7 +10,6 @@ import traceback
 from utils import camera_utils, data_utils
 from .transformer import QK_Norm_TransformerBlock, init_weights
 from .loss import LossComputer
-from ldm.util import instantiate_from_config
 
 
 class Images2LatentScene(nn.Module):
@@ -140,7 +139,26 @@ class Images2LatentScene(nn.Module):
     # instaciate the autoencoder'
     # grad_false - advoid extra training
     def _init_first_stage(self):
-        model = instantiate_from_config(self.config.model.first_stage_config)
+        import importlib
+        cfg = self.config.model.first_stage_config
+
+        module_path, class_name = cfg.target.rsplit(".", 1)
+        cls = getattr(importlib.import_module(module_path), class_name)
+
+        model = cls(
+            embed_dim=cfg.embed_dim,
+            ddconfig=cfg.ddconfig,
+            lossconfig=cfg.lossconfig,
+        )
+
+        # Load frozen checkpoint
+        ckpt_path = cfg.params.get("ckpt_path", None)
+        if ckpt_path:
+            state_dict = torch.load(ckpt_path, map_location="cpu")
+            # Unwrap common checkpoint wrappers
+            state_dict = state_dict.get("model", state_dict.get("state_dict", state_dict))
+            model.load_state_dict(state_dict, strict=True)
+
         model.eval()
         for param in model.parameters():
             param.requires_grad = False
