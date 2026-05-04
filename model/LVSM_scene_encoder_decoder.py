@@ -154,9 +154,9 @@ class Images2LatentScene(nn.Module):
         # Load frozen checkpoint
         ckpt_path = cfg.params.get("ckpt_path", None)
         if ckpt_path:
-            state_dict = torch.load(ckpt_path, map_location="cpu")
+            state_dict = torch.load(ckpt_path, map_location="cpu", weights_only=False)
             # Unwrap common checkpoint wrappers
-            state_dict = state_dict.get("model", state_dict.get("state_dict", state_dict))
+            state_dict = state_dict["model_state_dict"]
             model.load_state_dict(state_dict, strict=True)
 
         model.eval()

@@ -11,9 +11,11 @@
 #SBATCH -o sout/%x-%j.out
 #SBATCH -e sout/%x-%j.err
 
+OUTDIR=/work/hdd/bdxf/nstjohn/LVSM/experiments/LVSMwAE1
+
 set -euo pipefail
 mkdir -p sout
-mkdir -p /work/hdd/bdxf/nstjohn/LVSM/experiments/smoke_test
+mkdir -p /work/hdd/bdxf/nstjohn/LVSM/experiments/LVSMwAE1
 
 source /u/$USER/miniconda3/etc/profile.d/conda.sh
 conda activate /work/nvme/bdxf/nstjohn/conda_envs/LVSM
@@ -38,4 +40,4 @@ export PYTORCH_CUDA_ALLOC_CONF=""
     --rdzv_endpoint localhost:29510 \
     /u/nstjohn/LVSM/scripts/train_LVSM_ae.py \
     --config /u/nstjohn/LVSM/configs/LVSM/LVSM_scene_encoder_decoder_ae.yaml \
-    output_dir=/work/hdd/bdxf/nstjohn/LVSM/experiments/ae_test1
+    output_dir=$OUTDIR
