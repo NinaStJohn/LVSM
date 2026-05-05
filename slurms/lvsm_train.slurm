@@ -40,4 +40,6 @@ export PYTORCH_CUDA_ALLOC_CONF=""
     --rdzv_endpoint localhost:29510 \
     /u/nstjohn/LVSM/scripts/train_LVSM_ae.py \
     --config /u/nstjohn/LVSM/configs/LVSM/LVSM_scene_encoder_decoder_ae.yaml \
-    output_dir=$OUTDIR
+    output_dir=$OUTDIR \
+    training.checkpoint_dir=$OUTDIR/checkpoints
+

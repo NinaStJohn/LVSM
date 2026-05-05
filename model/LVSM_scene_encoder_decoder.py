@@ -261,8 +261,8 @@ class Images2LatentScene(nn.Module):
         with torch.no_grad():
             b, v, c, h, w = input.image.shape
             input.image = self.first_stage_model.encode(
-                input.image.view(b*v, c, h, w)
-            ).sample().view(b, v, 16, h//4, w//4)
+                input.image.reshape(b*v, c, h, w)
+            ).sample().reshape(b, v, 16, h//4, w//4)
 
         # Process input images - encodered
         posed_input_images = self.get_posed_input(
@@ -324,8 +324,8 @@ class Images2LatentScene(nn.Module):
         with torch.no_grad():
             bv = rendered_images.shape[0] * rendered_images.shape[1]
             rendered_images = self.first_stage_model.decode(
-                rendered_images.view(bv, 16, rendered_images.shape[3], rendered_images.shape[4])
-            ).view(rendered_images.shape[0], v_target, 3, height, width)
+                rendered_images.reshape(bv, 16, rendered_images.shape[3], rendered_images.shape[4])
+            ).reshape(rendered_images.shape[0], v_target, 3, height, width)
 
         if has_target_image:
             loss_metrics = self.loss_computer(
@@ -372,8 +372,8 @@ class Images2LatentScene(nn.Module):
         with torch.no_grad():
             b, v, c, h, w = input.image.shape
             input.image = self.first_stage_model.encode(
-                input.image.view(b*v, c, h, w)
-            ).sample().view(b, v, 16, h//4, w//4)
+                input.image.reshape(b*v, c, h, w)
+            ).sample().reshape(b, v, 16, h//4, w//4)
 
         
         # Prepare input tokens; [b, v, 3+6, h, w]
@@ -501,8 +501,8 @@ class Images2LatentScene(nn.Module):
             # autodeocer decode per chunk
             bv = video_rendering.shape[0] * video_rendering.shape[1]
             video_rendering = self.first_stage_model.decode(
-                video_rendering.view(bv, 16, video_rendering.shape[3], video_rendering.shape[4])
-            ).view(video_rendering.shape[0], cur_view_chunk_size, 3, height, width).cpu()
+                video_rendering.reshape(bv, 16, video_rendering.shape[3], video_rendering.shape[4])
+            ).reshape(video_rendering.shape[0], cur_view_chunk_size, 3, height, width).cpu()
 
             video_rendering_list.append(video_rendering)
 

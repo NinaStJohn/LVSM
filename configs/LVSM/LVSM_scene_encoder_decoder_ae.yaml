@@ -55,7 +55,7 @@ model:
 training:
   amp_dtype: bf16
   batch_size_per_gpu: 8
-  checkpoint_dir: /work/hdd/bdxf/nstjohn/LVSM/experiments/smoke_test/checkpoints
+  checkpoint_dir: /work/hdd/bdxf/nstjohn/LVSM/experiments/LVSMwAE1/checkpoints
   dataset_name: data.dataset_scene.Dataset
   dataset_path: /work/hdd/bdxf/nstjohn/dl3dv_processed/test/full_list.txt
   num_input_views: 2
