@@ -54,12 +54,12 @@ model:
 
 training:
   amp_dtype: bf16
-  batch_size_per_gpu: 8
+  batch_size_per_gpu: 2
   checkpoint_dir: /work/hdd/bdxf/nstjohn/LVSM/experiments/LVSMwAE1/checkpoints
   dataset_name: data.dataset_scene.Dataset
   dataset_path: /work/hdd/bdxf/nstjohn/dl3dv_processed/test/full_list.txt
   num_input_views: 2
-  num_target_views: 6
+  num_target_views: 2
   num_threads: 8
   num_views: 8
   num_workers: 4
