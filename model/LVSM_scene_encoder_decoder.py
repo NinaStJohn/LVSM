@@ -264,6 +264,17 @@ class Images2LatentScene(nn.Module):
                 input.image.reshape(b*v, c, h, w)
             ).sample().reshape(b, v, 16, h//4, w//4)
 
+        # Recompute rays at latent resolution (H/4, W/4) so spatial dims match encoded images.
+        lh, lw = h//4, w//4
+        input.ray_o, input.ray_d = self.process_data.compute_rays(
+            fxfycxcy=input.fxfycxcy, c2w=input.c2w,
+            h=lh, w=lw, device=input.image.device
+        )
+        target.ray_o, target.ray_d = self.process_data.compute_rays(
+            fxfycxcy=target.fxfycxcy, c2w=target.c2w,
+            h=lh, w=lw, device=input.image.device
+        )
+
         # Process input images - encodered
         posed_input_images = self.get_posed_input(
             images=input.image, ray_o=input.ray_o, ray_d=input.ray_d
@@ -310,22 +321,27 @@ class Images2LatentScene(nn.Module):
         
         height, width = target.image_h_w
 
+        # CHANGED: use latent resolution (lh, lw) for rearrange, not pixel resolution.
+        # The transformer output is in latent space — patch grid is lh/patch_size x lw/patch_size.
         patch_size = self.config.model.target_pose_tokenizer.patch_size
         rendered_images = rearrange(
             rendered_images, "(b v) (h w) (p1 p2 c) -> b v c (h p1) (w p2)",
             v=v_target,
-            h=height // patch_size, 
-            w=width // patch_size, 
-            p1=patch_size, 
-            p2=patch_size, 
-            c=16                    # update for ae
+            h=lh // patch_size,
+            w=lw // patch_size,
+            p1=patch_size,
+            p2=patch_size,
+            c=16 # update for ae
         )
-        # autoencoderr decode: [b, v, 16, h, w] -> [b, v, 3, H, W] - we need to reshae
-        with torch.no_grad():
-            bv = rendered_images.shape[0] * rendered_images.shape[1]
-            rendered_images = self.first_stage_model.decode(
-                rendered_images.reshape(bv, 16, rendered_images.shape[3], rendered_images.shape[4])
-            ).reshape(rendered_images.shape[0], v_target, 3, height, width)
+
+        # CHANGED: decode latent [b, v, 16, lh, lw] -> pixel [b, v, 3, H, W].
+        # pixel_height/width from target.image_h_w used only for output reshape, not rearrange.
+        pixel_height, pixel_width = target.image_h_w
+        # with torch.no_grad():    # decode outside no_grad — grads must flow back through rendered_images to transformer
+        bv = rendered_images.shape[0] * rendered_images.shape[1]
+        rendered_images = self.first_stage_model.decode(
+            rendered_images.reshape(bv, 16, rendered_images.shape[3], rendered_images.shape[4])
+        ).reshape(rendered_images.shape[0], v_target, 3, pixel_height, pixel_width)
 
         if has_target_image:
             loss_metrics = self.loss_computer(
@@ -339,9 +355,9 @@ class Images2LatentScene(nn.Module):
             input=input,
             target=target,
             loss_metrics=loss_metrics,
-            render=rendered_images        
-            )
-        
+            render=rendered_images
+        )
+
         return result
 
 
@@ -374,6 +390,13 @@ class Images2LatentScene(nn.Module):
             input.image = self.first_stage_model.encode(
                 input.image.reshape(b*v, c, h, w)
             ).sample().reshape(b, v, 16, h//4, w//4)
+
+        # CHANGED: recompute input rays at latent resolution before get_posed_input
+        lh, lw = h//4, w//4
+        input.ray_o, input.ray_d = self.process_data.compute_rays(
+            fxfycxcy=input.fxfycxcy, c2w=input.c2w,
+            h=lh, w=lw, device=input.image.device
+        )
 
         
         # Prepare input tokens; [b, v, 3+6, h, w]
@@ -488,21 +511,23 @@ class Images2LatentScene(nn.Module):
             patch_size = self.config.model.target_pose_tokenizer.patch_size
             
             video_rendering = self.image_token_decoder(target_image_tokens)
+
+            # CHANGED: rearrange using latent resolution (lh, lw), not pixel resolution
             video_rendering = rearrange(
                 video_rendering, "(b v) (h w) (p1 p2 c) -> b v c (h p1) (w p2)",
                 v=cur_view_chunk_size,
-                h=height // patch_size, 
-                w=width // patch_size, 
-                p1=patch_size, 
-                p2=patch_size, 
-                c=16                # ae changeee
+                h=lh // patch_size,
+                w=lw // patch_size,
+                p1=patch_size,
+                p2=patch_size,
+                c=16
             )
 
-            # autodeocer decode per chunk
+            # CHANGED: decode latent -> pixel, reshape output to pixel_height x pixel_width
             bv = video_rendering.shape[0] * video_rendering.shape[1]
             video_rendering = self.first_stage_model.decode(
                 video_rendering.reshape(bv, 16, video_rendering.shape[3], video_rendering.shape[4])
-            ).reshape(video_rendering.shape[0], cur_view_chunk_size, 3, height, width).cpu()
+            ).reshape(video_rendering.shape[0], cur_view_chunk_size, 3, pixel_height, pixel_width).cpu()
 
             video_rendering_list.append(video_rendering)
 
