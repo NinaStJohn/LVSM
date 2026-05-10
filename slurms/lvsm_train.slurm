@@ -3,7 +3,7 @@
 #SBATCH --account=bdxf-delta-gpu
 #SBATCH --partition=gpuA100x4
 #SBATCH --nodes=1
-#SBATCH --ntasks=4
+#SBATCH --ntasks=1
 #SBATCH --gpus-per-task=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=128G
@@ -33,7 +33,7 @@ export NCCL_DEBUG=WARN
 export PYTORCH_CUDA_ALLOC_CONF=""
 
 /work/nvme/bdxf/nstjohn/conda_envs/LVSM/bin/torchrun \
-    --nproc_per_node 4 \
+    --nproc_per_node 1 \
     --nnodes 1 \
     --rdzv_id 42001 \
     --rdzv_backend c10d \

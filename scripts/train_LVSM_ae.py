@@ -180,7 +180,11 @@ while cur_train_step <= total_train_steps:
                     if param.grad is not None:  # Some parameters might not have gradients
                         grad_norms[name] = param.grad.detach().norm().item()  # Detach for safety
                 for layer_name, grad_norm in grad_norms.items():
-                    wandb.log({"grad_norm_details/" + layer_name: grad_norm}, step=cur_train_step)
+                    # wandb things
+                    if config.training.get("use_wandb", True):
+                        wandb.log({"grad_norm_details/" + layer_name: grad_norm}, step=cur_train_step)
+                    else: # FIX
+                        print_rank0("\n".join(f"grad_norm_details/{k}={v:.6f}" for k, v in grad_norms.items()))
 
             total_grad_norm = 0.0
             if config.training.grad_clip_norm > 0:
@@ -197,7 +201,10 @@ while cur_train_step <= total_train_steps:
                 # show grad norm in wandb if it's too large
                 display_grad_norm = total_grad_norm > config.training.grad_clip_norm * 2.0 or total_grad_norm > allowed_gradnorm
                 if display_grad_norm and ddp_info.is_main_process:
-                    wandb.log({"grad_norm": total_grad_norm}, step=cur_train_step)
+                    if config.training.get("use_wandb", True):
+                        wandb.log({"grad_norm": total_grad_norm}, step=cur_train_step)
+                    else:
+                        print_rank0(f"step={cur_train_step} grad_norm={total_grad_norm:.4f}")
 
             # since skip flag may be updated because of grad norm, we check it again
             if not skip_optimizer_step:
@@ -241,6 +248,11 @@ while cur_train_step <= total_train_steps:
                 log_dict,
                 step=cur_train_step,
             )
+        elif (
+            (cur_train_step % config.training.wandb_log_every == 0) or
+            (cur_train_step < 200 + start_train_step)
+        ):
+            print_rank0(f"step={cur_train_step} param_update={cur_param_update_step} lr={optimizer.param_groups[0]['lr']:.6f} grad_norm={total_grad_norm} | " + " | ".join(f"{k}={v:.6f}" for k, v in loss_dict.items()))
 
         # save checkpoint
         if (cur_train_step % config.training.checkpoint_every == 0) or (cur_train_step == total_train_steps):
