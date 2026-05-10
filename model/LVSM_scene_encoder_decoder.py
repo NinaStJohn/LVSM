@@ -257,6 +257,9 @@ class Images2LatentScene(nn.Module):
         checkpoint_every = self.config.training.grad_checkpoint_every
         n_latent_vectors = self.config.model.transformer.n_latent_vectors
 
+        # save pixel-space images so we can so the intermidate visulization
+        input.image_pixel = input.image
+
         # autoencode the images before processing themmmmmmmm 
         with torch.no_grad():
             b, v, c, h, w = input.image.shape

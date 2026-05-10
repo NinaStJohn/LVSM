@@ -187,8 +187,8 @@ def visualize_intermediate_results(out_dir, result):
     input_uid_based_filename = f"{input_uids[0]:08}_{input_uids[-1]:08}"
     
     # Create a grid of input images
-    b, v, c, h, w = input.image.size()
-    input_images = input.image.reshape(b * v, c, h, w).detach().cpu()
+    b, v, c, h, w = input.image_pixel.size() # pixel space image
+    input_images = input.image_pixel.reshape(b * v, c, h, w).detach().cpu()
     input_grid = rearrange(input_images, "(b v) c h w -> (b h) (v w) c", v=v)
     input_grid = (input_grid.numpy() * 255.0).clip(0.0, 255.0).astype(np.uint8)
     
