@@ -55,7 +55,7 @@ model:
 training:
   amp_dtype: bf16
   batch_size_per_gpu: 2
-  checkpoint_dir: /work/hdd/bdxf/nstjohn/LVSM/experiments/LVSMwAE1/checkpoints
+  checkpoint_dir: /work/hdd/bdxf/nstjohn/LVSM/experiments/LVSMwAE4/checkpoints
   dataset_name: data.dataset_scene.Dataset
   dataset_path: /work/hdd/bdxf/nstjohn/dl3dv_processed/test/full_list.txt
   num_input_views: 2
@@ -70,7 +70,7 @@ training:
   use_amp: true
   use_rel_pose: false
   use_tf32: true
-  lpips_loss_weight: 0.0
+  lpips_loss_weight: 0.0 # maybe change to 0.05 to increase the grey patch patching?
   l2_loss_weight: 1.0
   perceptual_loss_weight: 0.5
   grad_checkpoint_every: 1
@@ -84,7 +84,7 @@ training:
   weight_decay: 0.05
 
   lr: 0.0004
-  train_steps: 1000         # smoke test
+  train_steps: 20000  
 
   print_every: 10
   vis_every: 100

@@ -74,8 +74,11 @@ class Dataset(Dataset):
                 start_w = (resize_w - min_size) // 2
                 image = image.crop((start_w, start_h, start_w + min_size, start_h + min_size))
 
+            # the autoencoder was trained on [-1,1] not [0,1]
             image = np.array(image) / 255.0
             image = torch.from_numpy(image).permute(2, 0, 1).float()
+            image = image * 2.0 - 1.0 #  # [0,1] -> [-1,1] to match AE training
+
             fxfycxcy = np.array(cur_frame["fxfycxcy"])
             resize_ratio_x = resize_w / original_image_w
             resize_ratio_y = resize_h / original_image_h

@@ -73,7 +73,10 @@ class Images2LatentScene(nn.Module):
                 (self.config.model.target_pose_tokenizer.patch_size**2) * self.config.model.first_stage_config.ddconfig.z_channels,      # 3 -> z_channels
                 bias=False,
             ),
-            nn.Sigmoid()
+
+            # squashes to [0,1] when we are expecting [-3,3]
+            # nn.Sigmoid()
+            
         )
         self.image_token_decoder.apply(init_weights)
 
