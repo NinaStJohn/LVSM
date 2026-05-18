@@ -77,6 +77,21 @@ total_num_epochs = int(total_param_update_steps * total_batch_size / len(dataset
 module, class_name = config.model.class_name.rsplit(".", 1)
 LVSM = importlib.import_module(module).__dict__[class_name]
 model = LVSM(config).to(ddp_info.device)
+
+# --- SANITY CHECK ---
+with torch.no_grad():
+    x = torch.randn(1, 3, 256, 256).to(ddp_info.device)
+    z = model.first_stage_model.encode(x).sample()
+    print(f"latent: mean={z.mean():.3f} std={z.std():.3f}")
+    
+    x_rec = model.first_stage_model.decode(z)
+    print(f"decoded: min={x_rec.min():.3f} max={x_rec.max():.3f}")
+    
+    fake_token = torch.randn(1, 1, 768).to(ddp_info.device)
+    out = model.image_token_decoder(fake_token)
+    print(f"token_decoder out: min={out.min():.3f} max={out.max():.3f}")
+# --- END SANITY CHECK ---
+
 model = DDP(model, device_ids=[ddp_info.local_rank])
 
 optimizer, optimized_param_dict, all_param_dict = create_optimizer(
