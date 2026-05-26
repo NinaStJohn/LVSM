@@ -9,7 +9,7 @@ from einops import rearrange, repeat
 import traceback
 from utils import camera_utils, data_utils
 from .transformer import QK_Norm_TransformerBlock, init_weights
-from .loss import LossComputer
+from .loss import LossComputer, LatentLossComputer
 
 
 class Images2LatentScene(nn.Module):
@@ -28,7 +28,10 @@ class Images2LatentScene(nn.Module):
         self._init_first_stage()
 
         # Initialize loss computer
-        self.loss_computer = LossComputer(config)
+        # self.loss_computer = LossComputer(config)
+        
+        # latent space loss calc
+        self.loss_latent_computer = LatentLossComputer(config) # torch.nn.MSELoss()
 
 
     def _create_tokenizer(self, in_channels, patch_size, d_model):
@@ -170,7 +173,8 @@ class Images2LatentScene(nn.Module):
     def train(self, mode=True):
         """Override the train method to keep the loss computer in eval mode"""
         super().train(mode)
-        self.loss_computer.eval()
+        # self.loss_computer.eval()
+        self.loss_latent_computer.eval()
         self.first_stage_model.eval()
 
 
@@ -270,6 +274,8 @@ class Images2LatentScene(nn.Module):
                 input.image.reshape(b*v, c, h, w)
             ).sample().reshape(b, v, 16, h//4, w//4)
 
+        # save latent_image instead of rewritiing everything
+
         # Recompute rays at latent resolution (H/4, W/4) so spatial dims match encoded images.
         lh, lw = h//4, w//4
         input.ray_o, input.ray_d = self.process_data.compute_rays(
@@ -345,15 +351,34 @@ class Images2LatentScene(nn.Module):
         pixel_height, pixel_width = target.image_h_w
         # with torch.no_grad():    # decode outside no_grad — grads must flow back through rendered_images to transformer
         bv = rendered_images.shape[0] * rendered_images.shape[1]
+
+        rendered_images_latent = rendered_images
         rendered_images = self.first_stage_model.decode(
             rendered_images.reshape(bv, 16, rendered_images.shape[3], rendered_images.shape[4])
         ).reshape(rendered_images.shape[0], v_target, 3, pixel_height, pixel_width)
 
+
+        # autoencode the images before processing themmmmmmmm 
+        with torch.no_grad():
+            b, v, c, h, w = target.image.shape
+            target.image_latent = self.first_stage_model.encode(
+                target.image.reshape(b*v, c, h, w)
+            ).sample().reshape(b, v, 16, h//4, w//4)
+        # c
+
         if has_target_image:
-            loss_metrics = self.loss_computer(
-                rendered_images,
-                target.image
+            # loss_metrics = self.loss_computer(
+            #     rendered_images,
+            #     target.image
+            # )
+
+            loss_metrics = self.loss_latent_computer(
+                rendered_images, 
+                target.image,
+                rendered_images_latent,
+                target.image_latent
             )
+        
         else:
             loss_metrics = None
 

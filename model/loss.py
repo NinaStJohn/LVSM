@@ -198,3 +198,108 @@ class LossComputer(nn.Module):
             norm_lpips_loss=lpips_loss / l2_loss
         )
         return loss_metrics
+
+
+class LatentLossComputer(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+
+        if self.config.training.lpips_loss_weight > 0.0:
+            # avoid multiple GPUs from downloading the same LPIPS model multiple times
+            if torch.distributed.get_rank() == 0:
+                self.lpips_loss_module = self._init_frozen_module(lpips.LPIPS(net="vgg"))
+            torch.distributed.barrier()
+            if torch.distributed.get_rank() != 0:
+                self.lpips_loss_module = self._init_frozen_module(lpips.LPIPS(net="vgg"))
+        if self.config.training.perceptual_loss_weight > 0.0:
+            self.perceptual_loss_module = self._init_frozen_module(PerceptualLoss())
+
+    def _init_frozen_module(self, module):
+        """Helper method to initialize and freeze a module's parameters."""
+        module.eval()
+        for param in module.parameters():
+            param.requires_grad = False
+        return module
+
+    def forward(
+        self,
+        rendering_image,    # [b,v,3,H,W] decoded pixel
+        target_image,       # [b,v,3,H,W] target pixel
+        rendering_latent,   # [b,v,16,lh,lw] transformers for latent
+        target_latent       # 
+
+    ):
+        """
+        Calculate various losses between rendering and target images.
+        This version also includes latent loss
+        
+        Args:
+            latent_rendering_image: [b,v,16,lh,lw], value range [-1, 1]
+            latent_target: [b,v,16,lh,lw], value range [-1, 1]
+            rendering_image: [b, v, 3, h, w], value range [0, 1]
+            target: [b, v, 3, h, w], value range [0, 1]
+        
+        Returns:
+            Dictionary of loss metrics
+        """
+
+        # only calculate pixel loss is needed
+        l2_loss        = torch.tensor(0.0, device=rendering_latent.device)
+        lpips_loss     = torch.tensor(0.0, device=rendering_latent.device)
+        perceptual_loss = torch.tensor(0.0, device=rendering_latent.device)
+
+        pixel_loss = (
+            self.config.training.l2_loss_weight > 0.0
+            or self.config.training.lpips_loss_weight > 0.0
+            or self.config.training.perceptual_loss_weight > 0.0
+        )
+
+        if pixel_loss:
+            b, v, _, h, w = rendering_image.size()
+            rendering_image = rendering_image.reshape(b * v, -1, h, w)
+            target_image = target_image.reshape(b * v, -1, h, w)
+            
+            # Handle alpha channel if present
+            if target_image.size(1) == 4:
+                target_image, _ = target_image.split([3, 1], dim=1)
+
+            l2_loss = torch.tensor(1e-8).to(rendering_image.device)
+            if self.config.training.l2_loss_weight > 0.0:
+                l2_loss = F.mse_loss(rendering_image, target_image)
+
+            lpips_loss = torch.tensor(0.0).to(l2_loss.device)
+            if self.config.training.lpips_loss_weight > 0.0:
+                # Scale from [0,1] to [-1,1] as required by LPIPS
+                lpips_loss = self.lpips_loss_module(
+                    rendering_image * 2.0 - 1.0, target_image * 2.0 - 1.0
+                ).mean()
+
+            perceptual_loss = torch.tensor(0.0).to(l2_loss.device)
+            if self.config.training.perceptual_loss_weight > 0.0:
+                perceptual_loss = self.perceptual_loss_module(rendering_image, target_image)
+        
+        # not sure why torch.nn.functional is importanted as F? but slay
+        latent_loss = F.mse_loss(rendering_latent, target_latent)
+        psnr = -10.0 * torch.log10(latent_loss + 1e-8)
+
+        loss = (
+            self.config.training.latent_loss_weight * latent_loss 
+            + self.config.training.l2_loss_weight * l2_loss
+            + self.config.training.lpips_loss_weight * lpips_loss
+            + self.config.training.perceptual_loss_weight * perceptual_loss
+        )
+
+        loss_metrics = edict(
+            loss=loss,
+            latent_loss=latent_loss,
+            l2_loss=l2_loss,
+            psnr=psnr,
+            lpips_loss=lpips_loss,
+            perceptual_loss=perceptual_loss,
+
+            # don't really know the point of these
+            # norm_perceptual_loss=perceptual_loss / l2_loss, 
+            # norm_lpips_loss=lpips_loss / l2_loss
+        )
+        return loss_metrics
