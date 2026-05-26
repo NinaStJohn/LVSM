@@ -34,6 +34,15 @@ if ddp_info.is_main_process and config.training.get("use_wandb", True):
     init_wandb_and_backup(config)
 dist.barrier()
 
+# save the autoencoder config
+if ddp_info.is_main_process:
+    from omegaconf import OmegaConf
+    os.makedirs(config.training.checkpoint_dir, exist_ok=True)
+    config_save_path = os.path.join(config.training.checkpoint_dir, "config.yaml")
+    OmegaConf.save(config, config_save_path)
+    print(f"Config saved to {config_save_path}")
+dist.barrier()
+
 
 # Set up tf32
 torch.backends.cuda.matmul.allow_tf32 = config.training.use_tf32

@@ -171,8 +171,13 @@ def visualize_intermediate_results(out_dir, result):
         target_image = target_image.reshape(b * v, -1, h, w)
         visualized_image = torch.cat((target_image, rendered_image), dim=3).detach().cpu()
         visualized_image = rearrange(visualized_image, "(b v) c h (m w) -> (b h) (v m w) c", v=v, m=2)
-        visualized_image = (visualized_image.numpy() * 255.0).clip(0.0, 255.0).astype(np.uint8)
+        # visualized_image = (visualized_image.numpy() * 255.0).clip(0.0, 255.0).astype(np.uint8)
         
+        # convert [-1,1] -> [[0,1]]
+        visualized_image = (visualized_image.numpy() * 0.5 + 0.5).clip(0.0, 1.0)
+        visualized_image = (visualized_image * 255.0).astype(np.uint8)
+
+
         uids = [target.index[b, 0, -1].item() for b in range(target.index.size(0))]
 
         uid_based_filename = f"{uids[0]:08}_{uids[-1]:08}"
@@ -189,8 +194,13 @@ def visualize_intermediate_results(out_dir, result):
     # Create a grid of input images
     b, v, c, h, w = input.image_pixel.size() # pixel space image
     input_images = input.image_pixel.reshape(b * v, c, h, w).detach().cpu()
+
     input_grid = rearrange(input_images, "(b v) c h w -> (b h) (v w) c", v=v)
-    input_grid = (input_grid.numpy() * 255.0).clip(0.0, 255.0).astype(np.uint8)
+    # input_grid = (input_grid.numpy() * 255.0).clip(0.0, 255.0).astype(np.uint8)
+
+    # convert [-1,1] -> [[0,1]]
+    input_grid = (input_grid.numpy() * 0.5 + 0.5).clip(0.0, 1.0)
+    input_grid = (input_grid * 255.0).astype(np.uint8)
     
     # Save the input image grid
     Image.fromarray(input_grid).save(
