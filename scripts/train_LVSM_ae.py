@@ -37,9 +37,13 @@ dist.barrier()
 # save the autoencoder config
 if ddp_info.is_main_process:
     from omegaconf import OmegaConf
+
+    def edict_to_dict(d):
+        return {k: edict_to_dict(v) if isinstance(v, dict) else v for k, v in d.items()}
+
     os.makedirs(config.training.checkpoint_dir, exist_ok=True)
     config_save_path = os.path.join(config.training.checkpoint_dir, "config.yaml")
-    OmegaConf.save(config, config_save_path)
+    OmegaConf.save(OmegaConf.create(edict_to_dict(config)), config_save_path)
     print(f"Config saved to {config_save_path}")
 dist.barrier()
 

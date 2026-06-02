@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=lvsm_LVSMwAE9
+#SBATCH --job-name=lvsm_plain
 #SBATCH --account=bdxf-delta-gpu
 #SBATCH --partition=gpuA100x4
 #SBATCH --nodes=1
@@ -11,11 +11,11 @@
 #SBATCH -o sout/%x-%j.out
 #SBATCH -e sout/%x-%j.err
 
-OUTDIR=/work/hdd/bdxf/nstjohn/LVSM/experiments/LVSMwAE9
+OUTDIR=/work/hdd/bdxf/nstjohn/LVSM/experiments/LVSM0
 
 set -euo pipefail
 mkdir -p sout
-mkdir -p /work/hdd/bdxf/nstjohn/LVSM/experiments/LVSMwAE9
+mkdir -p /work/hdd/bdxf/nstjohn/LVSM/experiments/LVSM0
 
 source /u/$USER/miniconda3/etc/profile.d/conda.sh
 conda activate /work/nvme/bdxf/nstjohn/conda_envs/LVSM
@@ -38,8 +38,8 @@ export PYTORCH_CUDA_ALLOC_CONF=""
     --rdzv_id 42001 \
     --rdzv_backend c10d \
     --rdzv_endpoint localhost:29510 \
-    /u/nstjohn/LVSM/scripts/train_LVSM_ae.py \
-    --config /u/nstjohn/LVSM/configs/LVSM/LVSM_scene_encoder_decoder_ae.yaml \
+    /u/nstjohn/LVSM/scripts/train.py \
+    --config /u/nstjohn/LVSM/configs/LVSM/LVSM_scene_decode_only_ae.yaml \
     output_dir=$OUTDIR \
     training.checkpoint_dir=$OUTDIR/checkpoints
 

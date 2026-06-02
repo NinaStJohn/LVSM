@@ -1,4 +1,6 @@
-# Copyright (c) 2025 Haian Jin. Created for the LVSM project (ICLR 2025).
+'''
+This code is going to be where we inject the autoencoder into the LVSM training
+'''
 
 import importlib
 import os
@@ -76,7 +78,6 @@ module, class_name = config.model.class_name.rsplit(".", 1)
 LVSM = importlib.import_module(module).__dict__[class_name]
 model = LVSM(config).to(ddp_info.device)
 model = DDP(model, device_ids=[ddp_info.local_rank])
-
 
 optimizer, optimized_param_dict, all_param_dict = create_optimizer(
     model,
@@ -179,7 +180,11 @@ while cur_train_step <= total_train_steps:
                     if param.grad is not None:  # Some parameters might not have gradients
                         grad_norms[name] = param.grad.detach().norm().item()  # Detach for safety
                 for layer_name, grad_norm in grad_norms.items():
-                    wandb.log({"grad_norm_details/" + layer_name: grad_norm}, step=cur_train_step)
+                    # wandb things
+                    if config.training.get("use_wandb", True):
+                        wandb.log({"grad_norm_details/" + layer_name: grad_norm}, step=cur_train_step)
+                    else: # FIX
+                        print_rank0("\n".join(f"grad_norm_details/{k}={v:.6f}" for k, v in grad_norms.items()))
 
             total_grad_norm = 0.0
             if config.training.grad_clip_norm > 0:
@@ -196,7 +201,8 @@ while cur_train_step <= total_train_steps:
                 # show grad norm in wandb if it's too large
                 display_grad_norm = total_grad_norm > config.training.grad_clip_norm * 2.0 or total_grad_norm > allowed_gradnorm
                 if display_grad_norm and ddp_info.is_main_process:
-                    wandb.log({"grad_norm": total_grad_norm}, step=cur_train_step)
+                    if config.training.get("use_wandb", True):
+                        wandb.log({"grad_norm": total_grad_norm}, step=cur_train_step)
 
             # since skip flag may be updated because of grad norm, we check it again
             if not skip_optimizer_step:
@@ -207,7 +213,7 @@ while cur_train_step <= total_train_steps:
         lr_scheduler.step()
         optimizer.zero_grad(set_to_none=True)
 
-# log and save checkpoint
+    # log and save checkpoint
     if ddp_info.is_main_process:
         loss_dict = {k: float(f"{v.item():.6f}") for k, v in ret_dict.loss_metrics.items()}
         # print in console
@@ -216,6 +222,7 @@ while cur_train_step <= total_train_steps:
             print_str += f" | Iter Time: {time.time() - tic:.2f}s | LR: {optimizer.param_groups[0]['lr']:.6f}"
             print_str += f" | GradNorm: {total_grad_norm:.4f}" if total_grad_norm is not None else " | GradNorm: N/A"
             print_str += "\n"
+            # Add loss values
             for k, v in loss_dict.items():
                 print_str += f"{k}: {v:.6f} | "
             print(print_str)
@@ -226,7 +233,7 @@ while cur_train_step <= total_train_steps:
             (cur_train_step < 200 + start_train_step)
         ):
             log_dict = {
-                "iter": cur_train_step,
+                "iter": cur_train_step, 
                 "forward_pass_step": cur_train_step,
                 "param_update_step": cur_param_update_step,
                 "lr": optimizer.param_groups[0]["lr"],
@@ -239,6 +246,11 @@ while cur_train_step <= total_train_steps:
                 log_dict,
                 step=cur_train_step,
             )
+        elif (
+            (cur_train_step % config.training.wandb_log_every == 0) or
+            (cur_train_step < 200 + start_train_step)
+        ):
+            print_rank0(f"step={cur_train_step} param_update={cur_param_update_step} lr={optimizer.param_groups[0]['lr']:.6f} grad_norm={total_grad_norm} | " + " | ".join(f"{k}={v:.6f}" for k, v in loss_dict.items()))
 
         # save checkpoint
         if (cur_train_step % config.training.checkpoint_every == 0) or (cur_train_step == total_train_steps):
@@ -257,7 +269,7 @@ while cur_train_step <= total_train_steps:
             ckpt_path = os.path.join(config.training.checkpoint_dir, f"ckpt_{cur_train_step:016}.pt")
             torch.save(checkpoint, ckpt_path)
             print(f"Saved checkpoint at step {cur_train_step} to {os.path.abspath(ckpt_path)}")
-
+        
         # export intermediate visualization results
         if export_inter_results:
             vis_path = os.path.join(config.training.checkpoint_dir, f"iter_{cur_train_step:08d}")
