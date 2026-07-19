@@ -232,9 +232,9 @@ class Images2LatentScene(nn.Module):
         input.image_pixel = input.image
         # autoencode the images before processing
         with torch.no_grad():
-            b, v, c, h, w = input.image.shape
-            input.image = self.first_stage_model.encode(
-                input.image.reshape(b*v, c, h, w)
+            b, v, c, h, w = target.image.shape
+            target.image_latent = self.first_stage_model.encode(
+                target.image.reshape(b*v, c, h, w) * 2.0 - 1.0
             ).sample().reshape(b, v, 16, h//4, w//4)
 
         # recompute rays at latent resolution (H/4, W/4)
@@ -300,7 +300,7 @@ class Images2LatentScene(nn.Module):
         )
         rendered_images_latent = rendered_images
         pixel_height, pixel_width = target.image_h_w
-        
+
         # get scales to match
         bv = rendered_images.shape[0] * rendered_images.shape[1]
         rendered_images = self.first_stage_model.decode(
@@ -361,9 +361,8 @@ class Images2LatentScene(nn.Module):
         with torch.no_grad():
             b, v, c, h, w = input.image.shape
             input.image = self.first_stage_model.encode(
-                input.image.reshape(b*v, c, h, w)
+                input.image.reshape(b*v, c, h, w) * 2.0 - 1.0
             ).sample().reshape(b, v, 16, h//4, w//4)
-
         lh, lw = h//4, w//4
         input.ray_o, input.ray_d = self.process_data.compute_rays(
             fxfycxcy=input.fxfycxcy, c2w=input.c2w,
@@ -485,7 +484,8 @@ class Images2LatentScene(nn.Module):
             pixel_height, pixel_width = target.image_h_w
             video_rendering = self.first_stage_model.decode(
                 video_rendering.reshape(bv, 16, video_rendering.shape[3], video_rendering.shape[4])
-            ).reshape(video_rendering.shape[0], cur_view_chunk_size, 3, pixel_height, pixel_width).cpu()
+            ).reshape(video_rendering.shape[0], cur_view_chunk_size, 3, pixel_height, pixel_width)
+            video_rendering = (video_rendering * 0.5 + 0.5).cpu()
 
             video_rendering_list.append(video_rendering)
         video_rendering = torch.cat(video_rendering_list, dim=1)
