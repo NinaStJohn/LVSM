@@ -244,44 +244,38 @@ class LatentLossComputer(nn.Module):
             Dictionary of loss metrics
         """
 
-        # only calculate pixel loss is needed
-        l2_loss        = torch.tensor(0.0, device=rendering_latent.device)
-        lpips_loss     = torch.tensor(0.0, device=rendering_latent.device)
-        perceptual_loss = torch.tensor(0.0, device=rendering_latent.device)
+        # pull the reshape out
+        b, v, _, h, w = rendering_image.size()
+        rendering_image = rendering_image.reshape(b * v, -1, h, w)
+        target_image = target_image.reshape(b * v, -1, h, w)
 
-        pixel_loss = (
-            self.config.training.l2_loss_weight > 0.0
-            or self.config.training.lpips_loss_weight > 0.0
-            or self.config.training.perceptual_loss_weight > 0.0
-        )
+        # Handle alpha channel if present
+        if target_image.size(1) == 4:
+            target_image, _ = target_image.split([3, 1], dim=1)
 
-        if pixel_loss:
-            b, v, _, h, w = rendering_image.size()
-            rendering_image = rendering_image.reshape(b * v, -1, h, w)
-            target_image = target_image.reshape(b * v, -1, h, w)
-            
-            # Handle alpha channel if present
-            if target_image.size(1) == 4:
-                target_image, _ = target_image.split([3, 1], dim=1)
+        # real pixel-space PSNR, always computed regardless of pixel loss weights
+        pixel_mse = F.mse_loss(rendering_image, target_image)
+        psnr = -10.0 * torch.log10(pixel_mse + 1e-8)
 
-            l2_loss = torch.tensor(1e-8).to(rendering_image.device)
-            if self.config.training.l2_loss_weight > 0.0:
-                l2_loss = F.mse_loss(rendering_image, target_image)
+        l2_loss        = torch.tensor(1e-8, device=rendering_image.device)
+        lpips_loss     = torch.tensor(0.0, device=rendering_image.device)
+        perceptual_loss = torch.tensor(0.0, device=rendering_image.device)
 
-            lpips_loss = torch.tensor(0.0).to(l2_loss.device)
-            if self.config.training.lpips_loss_weight > 0.0:
-                # Scale from [0,1] to [-1,1] as required by LPIPS
-                lpips_loss = self.lpips_loss_module(
-                    rendering_image * 2.0 - 1.0, target_image * 2.0 - 1.0
-                ).mean()
+        if self.config.training.l2_loss_weight > 0.0:
+            l2_loss = pixel_mse  # reuse, same computation
 
-            perceptual_loss = torch.tensor(0.0).to(l2_loss.device)
-            if self.config.training.perceptual_loss_weight > 0.0:
-                perceptual_loss = self.perceptual_loss_module(rendering_image, target_image)
-        
+        if self.config.training.lpips_loss_weight > 0.0:
+            # Scale from [0,1] to [-1,1] as required by LPIPS
+            lpips_loss = self.lpips_loss_module(
+                rendering_image * 2.0 - 1.0, target_image * 2.0 - 1.0
+            ).mean()
+
+        if self.config.training.perceptual_loss_weight > 0.0:
+            perceptual_loss = self.perceptual_loss_module(rendering_image, target_image)
+
         # not sure why torch.nn.functional is importanted as F? but slay
         latent_loss = F.mse_loss(rendering_latent, target_latent)
-        psnr = -10.0 * torch.log10(latent_loss + 1e-8)
+        latent_psnr = -10.0 * torch.log10(latent_loss + 1e-8)
 
         loss = (
             self.config.training.latent_loss_weight * latent_loss 
@@ -293,6 +287,7 @@ class LatentLossComputer(nn.Module):
         loss_metrics = edict(
             loss=loss,
             latent_loss=latent_loss,
+            latent_psnr=latent_psnr,
             l2_loss=l2_loss,
             psnr=psnr,
             lpips_loss=lpips_loss,

@@ -300,10 +300,14 @@ class Images2LatentScene(nn.Module):
         )
         rendered_images_latent = rendered_images
         pixel_height, pixel_width = target.image_h_w
+        
+        # get scales to match
         bv = rendered_images.shape[0] * rendered_images.shape[1]
         rendered_images = self.first_stage_model.decode(
             rendered_images.reshape(bv, 16, rendered_images.shape[3], rendered_images.shape[4])
         ).reshape(rendered_images.shape[0], v_target, 3, pixel_height, pixel_width)
+        
+        rendered_images = rendered_images * 0.5 + 0.5
 
         with torch.no_grad():
             b, v, c, h, w = target.image.shape

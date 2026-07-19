@@ -60,7 +60,7 @@ training:
   beta2: 0.95
   allowed_gradnorm_factor: 5
   scene_scale_factor: 1.35
-  checkpoint_dir: /work/hdd/bdxf/nstjohn/LVSM/experiments/LVSMwAE15_re/checkpoints
+  checkpoint_dir: /work/hdd/bdxf/nstjohn/LVSM/experiments/LVSMwAE16_re/checkpoints
   checkpoint_every: 500
   dataset_name: data.dataset_scene.Dataset
   dataset_path: /work/nvme/bdxf/re10k/test/full_list_delta.txt
@@ -70,7 +70,7 @@ training:
 
   # latent loss
   latent_loss_weight: 1.0
-  l2_loss_weight: 0.0
+  l2_loss_weight: 0.1 # little pixel lost just to see
   lpips_loss_weight: 0.0
   perceptual_loss_weight: 0.5
 
