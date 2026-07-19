@@ -12,13 +12,11 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
 import torch.distributed as dist
 from training_utils import init_config, init_distributed, init_wandb_and_backup
-from utils.metric_utils import visualize_intermediate_results
+from utils.metric_utils_ae import visualize_intermediate_results
 from utils.training_utils import create_optimizer, create_lr_scheduler, auto_resume_job, print_rank0
 
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from utils.metric_utils import visualize_intermediate_results
 
 # Load config and read(override) arguments from CLI
 config = init_config()

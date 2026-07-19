@@ -10,7 +10,7 @@ from einops import rearrange, repeat
 import traceback
 from utils import camera_utils, data_utils 
 from .transformer import QK_Norm_TransformerBlock, init_weights
-from .loss import LossComputer, LatentLossComputer
+from .loss import LossComputer
 
 
 class Images2LatentScene(nn.Module):
@@ -25,12 +25,8 @@ class Images2LatentScene(nn.Module):
         # Initialize transformer blocks
         self._init_transformer()
         
-        # Autoencoder
-        self._init_first_stage()
-
-        # latent space loss calc
-        self.loss_latent_computer = LatentLossComputer(config) # torch.nn.MSELoss()
-
+        # Initialize loss computer
+        self.loss_computer = LossComputer(config)
 
     def _create_tokenizer(self, in_channels, patch_size, d_model):
         """Helper function to create a tokenizer with given config"""
@@ -71,10 +67,10 @@ class Images2LatentScene(nn.Module):
             nn.LayerNorm(self.config.model.transformer.d, bias=False),
             nn.Linear(
                 self.config.model.transformer.d,
-                (self.config.model.target_pose_tokenizer.patch_size**2) * self.config.model.first_stage_config.ddconfig.z_channels,
+                (self.config.model.target_pose_tokenizer.patch_size**2) * 3,
                 bias=False,
             ),
-            # nn.Sigmoid() CHECK
+            nn.Sigmoid()
         )
         self.image_token_decoder.apply(init_weights)
 
@@ -106,43 +102,15 @@ class Images2LatentScene(nn.Module):
         self.transformer_blocks = nn.ModuleList(self.transformer_blocks)
         self.transformer_input_layernorm = nn.LayerNorm(config.d, bias=False)
 
-    # init first stage autoencoder
-    def _init_first_stage(self):
-        import importlib
-        cfg = self.config.model.first_stage_config
-
-        module_path, class_name = cfg.target.rsplit(".", 1)
-        cls = getattr(importlib.import_module(module_path), class_name)
-
-        model = cls(
-            embed_dim=cfg.embed_dim,
-            ddconfig=cfg.ddconfig,
-            lossconfig=cfg.lossconfig,
-        )
-
-        # Load frozen checkpoint
-        ckpt_path = cfg.params.get("ckpt_path", None)
-        if ckpt_path:
-            state_dict = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-            # Unwrap common checkpoint wrappers
-            state_dict = state_dict["model_state_dict"]
-            model.load_state_dict(state_dict, strict=True)
-
-        model.eval()
-        for param in model.parameters():
-            param.requires_grad = False
-        self.first_stage_model = model
-
 
     def train(self, mode=True):
         """Override the train method to keep the loss computer in eval mode"""
         super().train(mode)
-        self.loss_latent_computer.eval()
-        self.first_stage_model.eval()
+        self.loss_computer.eval()
 
 
     
-    def pass_layers(self, transformer_blocks, input_tokens, gradient_checkpoint=False, checkpoint_every=1):
+    def pass_layers(self, input_tokens, gradient_checkpoint=False, checkpoint_every=1):
         """
         Helper function to pass input tokens through all transformer blocks with optional gradient checkpointing.
         
@@ -159,11 +127,11 @@ class Images2LatentScene(nn.Module):
             Tensor of shape [batch_size, num_views * num_patches, hidden_dim]
                 The processed tokens after passing through all transformer blocks.
         """
-        num_layers = len(transformer_blocks)
+        num_layers = len(self.transformer_blocks)
         
         if not gradient_checkpoint:
             # Standard forward pass through all layers
-            for layer in transformer_blocks:
+            for layer in self.transformer_blocks:
                 input_tokens = layer(input_tokens)
             return input_tokens
             
@@ -171,7 +139,7 @@ class Images2LatentScene(nn.Module):
         def _process_layer_group(tokens, start_idx, end_idx):
             """Helper to process a group of consecutive layers."""
             for idx in range(start_idx, end_idx):
-                tokens = transformer_blocks[idx](tokens)
+                tokens = self.transformer_blocks[idx](tokens)
             return tokens
             
         # Process layer groups with gradient checkpointing
@@ -218,35 +186,12 @@ class Images2LatentScene(nn.Module):
         if images is None:
             return pose_cond
         else:
-            return torch.cat([images, pose_cond], dim=2)
+            return torch.cat([images * 2.0 - 1.0, pose_cond], dim=2)
     
     
     def forward(self, data_batch, has_target_image=True):
 
         input, target = self.process_data(data_batch, has_target_image=has_target_image, target_has_input = self.config.training.target_has_input, compute_rays=True)
-
-        checkpoint_every = self.config.training.grad_checkpoint_every
-        n_latent_vectors = self.config.model.transformer.n_latent_vectors
-
-        # save the pixel-space images
-        input.image_pixel = input.image
-        # autoencode the images before processing
-        with torch.no_grad():
-            b, v, c, h, w = input.image.shape
-            input.image = self.first_stage_model.encode(
-                input.image.reshape(b*v, c, h, w)
-            ).sample().reshape(b, v, 16, h//4, w//4)
-
-        # recompute rays at latent resolution (H/4, W/4)
-        lh, lw = h//4, w//4
-        input.ray_o, input.ray_d = self.process_data.compute_rays(
-            fxfycxcy=input.fxfycxcy, c2w=input.c2w,
-            h=lh, w=lw, device=input.image.device
-        )
-        target.ray_o, target.ray_d = self.process_data.compute_rays(
-            fxfycxcy=target.fxfycxcy, c2w=target.c2w,
-            h=lh, w=lw, device=input.image.device
-        )
 
         # Process input images
         posed_input_images = self.get_posed_input(
@@ -264,7 +209,6 @@ class Images2LatentScene(nn.Module):
 
         b, v_target, c, h, w = target_pose_cond.size()
         target_pose_tokens = self.target_pose_tokenizer(target_pose_cond) # [b*v, n_patches, d]
-        _, n_patches_target, _ = target_pose_tokens.size()
 
         # Repeat input tokens for each target view
         repeated_input_img_tokens = repeat(
@@ -276,12 +220,12 @@ class Images2LatentScene(nn.Module):
         transformer_input = torch.cat((repeated_input_img_tokens, target_pose_tokens), dim=1)  
         concat_img_tokens = self.transformer_input_layernorm(transformer_input)
         checkpoint_every = self.config.training.grad_checkpoint_every
-        transformer_output_tokens = self.pass_layers(self.transformer_blocks, concat_img_tokens, gradient_checkpoint=True, checkpoint_every=checkpoint_every)
+        transformer_output_tokens = self.pass_layers(concat_img_tokens, gradient_checkpoint=True, checkpoint_every=checkpoint_every)
 
         # Discard the input tokens
         _, target_image_tokens = transformer_output_tokens.split(
-            [v_input * n_patches, n_patches_target], dim=1
-        ) # [b * v_target, v*n_patches, d], [b * v_target, n_patches_target, d]
+            [v_input * n_patches, n_patches], dim=1
+        ) # [b * v_target, v*n_patches, d], [b * v_target, n_patches, d]
 
         # [b*v_target, n_patches, p*p*3]
         rendered_images = self.image_token_decoder(target_image_tokens)
@@ -292,31 +236,16 @@ class Images2LatentScene(nn.Module):
         rendered_images = rearrange(
             rendered_images, "(b v) (h w) (p1 p2 c) -> b v c (h p1) (w p2)",
             v=v_target,
-            h=lh // patch_size,
-            w=lw // patch_size,
-            p1=patch_size,
-            p2=patch_size,
-            c=16
+            h=height // patch_size, 
+            w=width // patch_size, 
+            p1=patch_size, 
+            p2=patch_size, 
+            c=3
         )
-        rendered_images_latent = rendered_images
-        pixel_height, pixel_width = target.image_h_w
-        bv = rendered_images.shape[0] * rendered_images.shape[1]
-        rendered_images = self.first_stage_model.decode(
-            rendered_images.reshape(bv, 16, rendered_images.shape[3], rendered_images.shape[4])
-        ).reshape(rendered_images.shape[0], v_target, 3, pixel_height, pixel_width)
-
-        with torch.no_grad():
-            b, v, c, h, w = target.image.shape
-            target.image_latent = self.first_stage_model.encode(
-                target.image.reshape(b*v, c, h, w)
-            ).sample().reshape(b, v, 16, h//4, w//4)
-
         if has_target_image:
-            loss_metrics = self.loss_latent_computer(
+            loss_metrics = self.loss_computer(
                 rendered_images,
-                target.image,
-                rendered_images_latent,
-                target.image_latent
+                target.image
             )
         else:
             loss_metrics = None
@@ -353,19 +282,7 @@ class Images2LatentScene(nn.Module):
             data_batch = edict(input=input, target=target)
         else:
             input, target = data_batch.input, data_batch.target
-
-        with torch.no_grad():
-            b, v, c, h, w = input.image.shape
-            input.image = self.first_stage_model.encode(
-                input.image.reshape(b*v, c, h, w)
-            ).sample().reshape(b, v, 16, h//4, w//4)
-
-        lh, lw = h//4, w//4
-        input.ray_o, input.ray_d = self.process_data.compute_rays(
-            fxfycxcy=input.fxfycxcy, c2w=input.c2w,
-            h=lh, w=lw, device=input.image.device
-        )
-
+        
         # Prepare input tokens; [b, v, 3+6, h, w]
         posed_images = self.get_posed_input(
             images=input.image, ray_o=input.ray_o, ray_d=input.ray_d
@@ -432,8 +349,8 @@ class Images2LatentScene(nn.Module):
         _, num_views, c, h, w = target_pose_cond.size()
     
         target_pose_tokens = self.target_pose_tokenizer(target_pose_cond) # [bs*v_target, n_patches, d]
-        _, n_patches_target, d = target_pose_tokens.size()  # [b*v_target, n_patches, d]
-        target_pose_tokens = target_pose_tokens.reshape(bs, num_views * n_patches_target, d)  # [b, v_target*n_patches, d]
+        _, n_patches, d = target_pose_tokens.size()  # [b*v_target, n_patches, d]
+        target_pose_tokens = target_pose_tokens.reshape(bs, num_views * n_patches, d)  # [b, v_target*n_patches, d]
 
         view_chunk_size = 4
 
@@ -444,22 +361,22 @@ class Images2LatentScene(nn.Module):
             # [b, (v_input*n_patches), d] -> [(b * cur_v_target), (v_input*n_patches), d]
             repeated_input_img_tokens = repeat(input_img_tokens.detach(), 'b np d -> (b chunk) np d', chunk=cur_view_chunk_size, np=n_patches* v_input)
 
-            start_idx, end_idx = cur_chunk * n_patches_target, (cur_chunk + cur_view_chunk_size) * n_patches_target            
+            start_idx, end_idx = cur_chunk * n_patches, (cur_chunk + cur_view_chunk_size) * n_patches            
             # [b, v_target * n_patches, d] -> [b, cur_v_target*n_patches, d] -> [b*cur_v_target, n_patches, d]
             cur_target_pose_tokens = rearrange(target_pose_tokens[:, start_idx:end_idx,: ], 
                                                "b (v_chunk p) d -> (b v_chunk) p d", 
-                                               v_chunk=cur_view_chunk_size, p=n_patches_target)
+                                               v_chunk=cur_view_chunk_size, p=n_patches)
 
             cur_concat_input_tokens = torch.cat((repeated_input_img_tokens, cur_target_pose_tokens,), dim=1) # [b*cur_v_target, v_input*n_patches+n_patches, d]
             cur_concat_input_tokens = self.transformer_input_layernorm(
                 cur_concat_input_tokens
             )
 
-            transformer_output_tokens = self.pass_layers(self.transformer_blocks, cur_concat_input_tokens, gradient_checkpoint=False)
+            transformer_output_tokens = self.pass_layers(cur_concat_input_tokens, gradient_checkpoint=False)
 
             _, pred_target_image_tokens = transformer_output_tokens.split(
-                [v_input * n_patches, n_patches_target], dim=1
-            ) # [b * v_target, v*n_patches, d], [b * v_target, n_patches_target, d]
+                [v_input * n_patches, n_patches], dim=1
+            ) # [b * v_target, v*n_patches, d], [b * v_target, n_patches, d]
 
             height, width = target.image_h_w
 
@@ -471,17 +388,12 @@ class Images2LatentScene(nn.Module):
             video_rendering = rearrange(
                 video_rendering, "(b v) (h w) (p1 p2 c) -> b v c (h p1) (w p2)",
                 v=cur_view_chunk_size,
-                h=lh // patch_size,
-                w=lw // patch_size,
-                p1=patch_size,
-                p2=patch_size,
-                c=16
-            )
-            bv = video_rendering.shape[0] * video_rendering.shape[1]
-            pixel_height, pixel_width = target.image_h_w
-            video_rendering = self.first_stage_model.decode(
-                video_rendering.reshape(bv, 16, video_rendering.shape[3], video_rendering.shape[4])
-            ).reshape(video_rendering.shape[0], cur_view_chunk_size, 3, pixel_height, pixel_width).cpu()
+                h=height // patch_size, 
+                w=width // patch_size, 
+                p1=patch_size, 
+                p2=patch_size, 
+                c=3
+            ).cpu()
 
             video_rendering_list.append(video_rendering)
         video_rendering = torch.cat(video_rendering_list, dim=1)

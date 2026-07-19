@@ -1,49 +1,81 @@
-output_dir: /work/hdd/bdxf/nstjohn/LVSM/experiments/smoke_test
+output_dir: /work/hdd/bdxf/nstjohn/LVSM/experiments/decoder_only
 
 model:
   class_name: model.LVSM_scene_decoder_only.Images2LatentScene
 
   image_tokenizer:
     image_size: 256
-    patch_size: 8
-    in_channels: 9  # 3 RGB + 3 direction + 3 Reference
+    patch_size: 2
+    in_channels: 22  # z_channels: 16 => 16 z + 3 dir + 3 ref
+                     # old 3 RGB + 3 direction + 3 Reference
 
   target_pose_tokenizer:
     image_size: 256
     patch_size: 8
     in_channels: 6  # 3 direction + 3 Reference
+    
   transformer:
     d: 768
     d_head: 64
-    n_layer: 24
+    n_layer: 12
     special_init: true
     depth_init: true
     use_qk_norm: true
+    n_latent_vectors: 3072
+
+
+  first_stage_config:
+    target: model.autoencoder_vae.AutoencoderKL
+    params:
+      ckpt_path: /work/hdd/bdxf/nstjohn/LVSM/autoencoder/checkpoints/latest.pt
+      monitor: val/rec_loss
+    embed_dim: 16
+    ddconfig:
+      double_z: true
+      z_channels: 16
+      resolution: 256          # training resolution (square crop)
+      in_channels: 3
+      out_ch: 3
+      ch: 128                  # bumped from 64 — gives better reconstruction at 256
+      ch_mult: [1, 2, 4]       # 3 levels -> 4x spatial downsampling (256 -> 64 latent)
+      num_res_blocks: 2        # bumped from 1 for better capacity
+      attn_resolutions: []     # fully conv — handles any resolution at inference
+      attn_type: "vanilla"     # use vanilla (softmax) attention if attn_resolutions non-empty
+      dropout: 0.0
+    lossconfig:
+      disc_start: 50001        # train AE alone first, then add discriminator
+      kl_weight: 0.000001
+      disc_weight: 0.5
+      perceptual_weight: 1.0
+      disc_num_layers: 3
+      disc_in_channels: 3
+      disc_ndf: 64
+      disc_loss: hinge
+
 
 training:
-  use_wandb: false
-
   amp_dtype: bf16
-  api_key_path: /u/nstjohn/LVSM/configs/api_keys/api_keys.yaml
-  batch_size_per_gpu: 4
+  batch_size_per_gpu: 2       # made smaller
   beta1: 0.9
   beta2: 0.95
   allowed_gradnorm_factor: 5
   scene_scale_factor: 1.35
-  checkpoint_dir: /work/hdd/bdxf/nstjohn/LVSM/experiments/LVSM0/checkpoints
+  checkpoint_dir: /work/hdd/bdxf/nstjohn/LVSM/experiments/LVSMwAE15_re/checkpoints
   checkpoint_every: 500
   dataset_name: data.dataset_scene.Dataset
-  dataset_path: /work/hdd/bdxf/nstjohn/dl3dv_processed/test/full_list.txt
+  dataset_path: /work/nvme/bdxf/re10k/test/full_list_delta.txt
   grad_accum_steps: 1
   grad_checkpoint_every: 1
   grad_clip_norm: 1.0
 
-  l2_loss_weight: 1.0
+  # latent loss
+  latent_loss_weight: 1.0
+  l2_loss_weight: 0.0
   lpips_loss_weight: 0.0
   perceptual_loss_weight: 0.5
 
   lr: 0.0004
-  train_steps: 100000
+  train_steps: 1000000
 
 
   num_input_views: 2
@@ -64,10 +96,14 @@ training:
     max_frame_dist: 192
     min_frame_dist: 25
   vis_every: 1000
+
+
+  # wandb unused things
+  use_wandb: false
   wandb_exp_name: LVSM_scene_decoder_only
   wandb_log_every: 50
-  
   wandb_project: LVSM
+  
   warmup: 3000
   weight_decay: 0.05
 
