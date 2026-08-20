@@ -237,6 +237,12 @@ class Images2LatentScene(nn.Module):
                 target.image.reshape(b*v, c, h, w) * 2.0 - 1.0
             ).sample().reshape(b, v, 16, h//4, w//4)
 
+            # Need to pass the target image through the encode
+            bi, vi, ci, hi, wi = input.image.shape
+            input.image = self.first_stage_model.encode(
+                input.image.reshape(bi*vi, ci, hi, wi) * 2.0 - 1.0
+            ).sample().reshape(bi, vi, 16, hi//4, wi//4)
+
         # recompute rays at latent resolution (H/4, W/4)
         lh, lw = h//4, w//4
         input.ray_o, input.ray_d = self.process_data.compute_rays(
@@ -308,12 +314,6 @@ class Images2LatentScene(nn.Module):
         ).reshape(rendered_images.shape[0], v_target, 3, pixel_height, pixel_width)
         
         rendered_images = rendered_images * 0.5 + 0.5
-
-        with torch.no_grad():
-            b, v, c, h, w = target.image.shape
-            target.image_latent = self.first_stage_model.encode(
-                target.image.reshape(b*v, c, h, w)
-            ).sample().reshape(b, v, 16, h//4, w//4)
 
         if has_target_image:
             loss_metrics = self.loss_latent_computer(
