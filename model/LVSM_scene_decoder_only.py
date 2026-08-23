@@ -11,7 +11,7 @@ import traceback
 from utils import camera_utils, data_utils 
 from .transformer import QK_Norm_TransformerBlock, init_weights
 from .loss import LossComputer, LatentLossComputer
-
+from utils import debug_utils
 
 class Images2LatentScene(nn.Module):
     def __init__(self, config):
@@ -228,8 +228,32 @@ class Images2LatentScene(nn.Module):
         checkpoint_every = self.config.training.grad_checkpoint_every
         n_latent_vectors = self.config.model.transformer.n_latent_vectors
 
+        # DEBUG: step counter + gating flag, computed once per forward call
+        debug_cfg = self.config.get("debug", {})
+        debug_enabled = debug_cfg.get("enabled", False)
+        debug_interval = debug_cfg.get("interval", 500)
+        self._debug_step = getattr(self, "_debug_step", 0) + 1
+        do_debug = debug_enabled and (self._debug_step % debug_interval == 0)
+        if do_debug:
+            from utils import debug_utils
+            debug_out_dir = debug_cfg.get("out_dir", "./debug_out")
+
+
         # save the pixel-space images
         input.image_pixel = input.image
+
+        # DEBUG: raw pixel input, pre-VAE-encode
+        if do_debug:
+            debug_utils.dump_tensor_state(
+                input.image_pixel, "01_input_pixel_raw", debug_out_dir,
+                step=self._debug_step, is_latent=False
+            )
+            debug_utils.vae_roundtrip_test(
+                self.first_stage_model, target.image, debug_out_dir, step=self._debug_step
+            )
+
+
+
         # autoencode the images before processing
         with torch.no_grad():
             b, v, c, h, w = target.image.shape
@@ -242,6 +266,18 @@ class Images2LatentScene(nn.Module):
             input.image = self.first_stage_model.encode(
                 input.image.reshape(bi*vi, ci, hi, wi)
             ).sample().reshape(bi, vi, 16, hi//4, wi//4)
+
+
+        # DEBUG: post-encode latents, decoded back to check round-trip at this stage
+        if do_debug:
+            debug_utils.dump_tensor_state(
+                target.image_latent, "02_target_latent_encoded", debug_out_dir,
+                step=self._debug_step, is_latent=True, vae=self.first_stage_model
+            )
+            debug_utils.dump_tensor_state(
+                input.image, "02_input_latent_encoded", debug_out_dir,
+                step=self._debug_step, is_latent=True, vae=self.first_stage_model
+            )
 
         # recompute rays at latent resolution (H/4, W/4)
         lh, lw = h//4, w//4
@@ -307,6 +343,14 @@ class Images2LatentScene(nn.Module):
         rendered_images_latent = rendered_images
         pixel_height, pixel_width = target.image_h_w
 
+        # DEBUG: transformer's predicted latents, pre-VAE-decode -- most likely spot
+        # for a scale/distribution mismatch to first show up
+        if do_debug:
+            debug_utils.dump_tensor_state(
+                rendered_images_latent, "03_predicted_latent", debug_out_dir,
+                step=self._debug_step, is_latent=True, vae=self.first_stage_model
+            )
+        
         # get scales to match
         bv = rendered_images.shape[0] * rendered_images.shape[1]
         rendered_images = self.first_stage_model.decode(
@@ -315,8 +359,24 @@ class Images2LatentScene(nn.Module):
         
         rendered_images = rendered_images * 0.5 + 0.5
 
+        # DEBUG: final decoded output, post-rescale -- compare directly against target_image_01
+        if do_debug:
+            debug_utils.dump_tensor_state(
+                rendered_images, "04_final_render", debug_out_dir,
+                step=self._debug_step, is_latent=False
+            )
+
         if has_target_image:
             target_image_01 = target.image * 0.5 + 0.5  # [0,1]
+
+            # DEBUG: ground truth for direct visual comparison against 04_final_render
+            if do_debug:
+                debug_utils.dump_tensor_state(
+                    target_image_01, "04_target_image_01", debug_out_dir,
+                    step=self._debug_step, is_latent=False
+                )
+
+
             loss_metrics = self.loss_latent_computer(
                 rendered_images,
                 target_image_01,
