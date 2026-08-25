@@ -363,7 +363,7 @@ class Images2LatentScene(nn.Module):
         if do_debug:
             debug_utils.dump_tensor_state(
                 rendered_images, "04_final_render", debug_out_dir,
-                step=self._debug_step, is_latent=False
+                step=self._debug_step, already_01=True
             )
 
         if has_target_image:
@@ -372,7 +372,7 @@ class Images2LatentScene(nn.Module):
             # DEBUG: ground truth for direct visual comparison against 04_final_render
             if do_debug:
                 debug_utils.dump_tensor_state(
-                    target_image_01, "04_target_image_01", debug_out_dir,
+                    target.image, "04_target_image_01", debug_out_dir,
                     step=self._debug_step, is_latent=False
                 )
 

@@ -78,6 +78,7 @@ def dump_tensor_state(
     is_latent=False,
     vae=None,
     max_items=4,
+    already_01=False,
 ):
     """
     Full debug dump: logs stats (via log_tensor_stats) AND saves a PNG visualization.
@@ -126,6 +127,8 @@ def dump_tensor_state(
         # log post-decode stats too, since this is where scale mismatches usually show up
         log_tensor_stats(decoded, f"{name}_decoded", log_path=log_path, step=step)
         pixel_01 = decoded * 0.5 + 0.5
+    elif already_01:
+        pixel_01 = t # No rescale, already [0,1]
     else:
         # assume already pixel-space in [-1, 1] (LVSM convention)
         pixel_01 = t * 0.5 + 0.5
