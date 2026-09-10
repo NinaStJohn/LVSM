@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=LVSMwAE26_re
+#SBATCH --job-name=LVSMwAE28_re
 #SBATCH --account=bdxf-delta-gpu
 #SBATCH --partition=gpuA100x4
 #SBATCH --nodes=1
@@ -11,11 +11,11 @@
 #SBATCH -o sout/%x-%j.out
 #SBATCH -e sout/%x-%j.err
 
-OUTDIR=/work/hdd/bdxf/nstjohn/LVSM/experiments/LVSMwAE26_re
+OUTDIR=/work/hdd/bdxf/nstjohn/LVSM/experiments/LVSMwAE28_re
 
 set -euo pipefail
 mkdir -p sout
-mkdir -p /work/hdd/bdxf/nstjohn/LVSM/experiments/LVSMwAE26_re
+mkdir -p /work/hdd/bdxf/nstjohn/LVSM/experiments/LVSMwAE28_re
 
 source /u/$USER/miniconda3/etc/profile.d/conda.sh
 conda activate /work/nvme/bdxf/nstjohn/conda_envs/LVSM
