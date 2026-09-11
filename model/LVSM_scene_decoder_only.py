@@ -372,7 +372,7 @@ class Images2LatentScene(nn.Module):
             # DEBUG: ground truth for direct visual comparison against 04_final_render
             if do_debug:
                 debug_utils.dump_tensor_state(
-                    target.image, "04_target_image_01", debug_out_dir,
+                    target_image_01, "04_target_image_01", debug_out_dir,
                     step=self._debug_step, is_latent=False
                 )
 
