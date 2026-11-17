@@ -236,7 +236,10 @@ class Images2LatentScene(nn.Module):
         do_debug = debug_enabled and (self._debug_step % debug_interval == 0)
         if do_debug:
             from utils import debug_utils
-            debug_out_dir = debug_cfg.get("out_dir", "./debug_out")
+        debug_out_dir = debug_cfg.get("out_dir", "./debug_out")
+        # cheap scalar tier: logged far more often than the full tensor/PNG dump
+        scalar_interval = debug_cfg.get("scalar_interval", 50)
+        do_scalars = debug_enabled and scalar_interval > 0 and (self._debug_step % scalar_interval == 0)
 
 
         # save the pixel-space images
@@ -376,6 +379,13 @@ class Images2LatentScene(nn.Module):
                     step=self._debug_step, is_latent=False
                 )
 
+
+            if do_scalars:
+                debug_utils.log_scalar_metrics(
+                    rendered_images_latent, target.image_latent,
+                    rendered_images, target_image_01,
+                    debug_out_dir, step=self._debug_step
+                )
 
             loss_metrics = self.loss_latent_computer(
                 rendered_images,

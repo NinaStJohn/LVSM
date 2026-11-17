@@ -94,6 +94,56 @@ def _append_csv_row(log_path, row):
         w.writerow(row)
 
 
+@torch.no_grad()
+def log_scalar_metrics(pred_latent, target_latent, pred_img01, target_img01, out_dir, step=None):
+    """
+    Cheap per-step scalars, one wide CSV row per call -> <out_dir>/debug_scalars.csv.
+    Everything is computed on-GPU and pulled to CPU with a single sync.
+
+    Args:
+        pred_latent / target_latent: [b, v, c, h, w] transformer output / VAE-encoded target
+        pred_img01 / target_img01: [b, v, 3, H, W] decoded prediction / target, in [0, 1]
+    """
+    if not is_rank0():
+        return
+    os.makedirs(out_dir, exist_ok=True)
+
+    p, t = pred_latent.detach().float(), target_latent.detach().float()
+    pi, ti = pred_img01.detach().float(), target_img01.detach().float()
+
+    # per-channel std over (b, v, h, w)
+    ch_p = p.std(dim=(0, 1, 3, 4))
+    ch_t = t.std(dim=(0, 1, 3, 4))
+    mse_img = ((pi - ti) ** 2).mean()
+
+    scalars = torch.stack([
+        p.std(), t.std(), p.std() / t.std().clamp_min(1e-8),
+        ((p - t) ** 2).mean(),
+        (t ** 2).mean(),  # baseline: MSE of predicting all-zeros
+        torch.nn.functional.cosine_similarity(p.flatten(1), t.flatten(1), dim=1).mean(),
+        10.0 * torch.log10(1.0 / mse_img.clamp_min(1e-10)),  # decoded PSNR
+        (~torch.isfinite(p)).float().mean(),
+        (~torch.isfinite(pi)).float().mean(),
+        ((pi < 0) | (pi > 1)).float().mean(),  # out-of-range fraction
+        ti.mean(),
+    ]).tolist()
+    ch_vals = torch.cat([ch_p, ch_t]).tolist()
+
+    cols = ["pred_std", "target_std", "std_ratio", "latent_mse", "latent_mse_zero_baseline",
+            "latent_cosine", "decoded_psnr", "pred_latent_nonfinite_frac",
+            "render_nonfinite_frac", "render_out_of_range_frac", "target_img_mean"]
+    n_ch = ch_p.numel()
+    cols += [f"pred_std_ch{i}" for i in range(n_ch)] + [f"target_std_ch{i}" for i in range(n_ch)]
+
+    path = os.path.join(out_dir, "debug_scalars.csv")
+    new = not os.path.exists(path)
+    with open(path, "a", newline="") as f:
+        w = csv.writer(f)
+        if new:
+            w.writerow(["step"] + cols)
+        w.writerow([step] + [f"{x:.6g}" for x in scalars + ch_vals])
+
+
 def dump_tensor_state(
     tensor,
     name,
