@@ -1,24 +1,24 @@
 #!/bin/bash
-#SBATCH --job-name=LVSMwAE28_re
-#SBATCH --account=bdxf-delta-gpu
+#SBATCH --job-name=LVSMwAE30_re
+#SBATCH --account=bjvg-delta-gpu
 #SBATCH --partition=gpuA100x4
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gpus-per-task=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=128G
-#SBATCH --time=0-04:00:00
+#SBATCH --time=2-00:00:00
 #SBATCH -o sout/%x-%j.out
 #SBATCH -e sout/%x-%j.err
 
-OUTDIR=/work/hdd/bdxf/nstjohn/LVSM/experiments/LVSMwAE28_re
+OUTDIR=/work/hdd/bjvg/nstjohn/LVSM/experiments/LVSMwAE30_re
 
 set -euo pipefail
 mkdir -p sout
-mkdir -p /work/hdd/bdxf/nstjohn/LVSM/experiments/LVSMwAE28_re
+mkdir -p /work/hdd/bjvg/nstjohn/LVSM/experiments/LVSMwAE30_re
 
 source /u/$USER/miniconda3/etc/profile.d/conda.sh
-conda activate /work/nvme/bdxf/nstjohn/conda_envs/LVSM
+conda activate /work/nvme/bdxf/nstjohn/conda_envs/LVSM # this shold be moved to bjvg
 
 cd /u/nstjohn/LVSM
 
