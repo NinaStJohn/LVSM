@@ -1,5 +1,6 @@
 # Copyright (c) 2025 Nina St John. Debug utilities for LVSM project.
 
+import csv
 import os
 import torch
 from einops import rearrange
@@ -68,6 +69,29 @@ def log_tensor_stats(tensor, name, log_path=None, step=None):
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
         with open(log_path, "a") as f:
             f.write(line + "\n")
+        _append_csv_row(
+            log_path,
+            dict(
+                step=step, name=name, shape="x".join(map(str, t.shape)),
+                dtype=str(t.dtype).replace("torch.", ""),
+                min=f"{t.min().item():.4f}", max=f"{t.max().item():.4f}",
+                mean=f"{t.mean().item():.4f}", std=f"{t.std().item():.4f}",
+            ),
+        )
+
+
+CSV_FIELDS = ["step", "name", "shape", "dtype", "min", "max", "mean", "std", "mse"]
+
+
+def _append_csv_row(log_path, row):
+    """Append one row to debug_log.csv next to the .txt log (header written once)."""
+    csv_path = os.path.splitext(log_path)[0] + ".csv"
+    new = not os.path.exists(csv_path)
+    with open(csv_path, "a", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=CSV_FIELDS, restval="")
+        if new:
+            w.writeheader()
+        w.writerow(row)
 
 
 def dump_tensor_state(
@@ -203,3 +227,4 @@ def vae_roundtrip_test(vae, image_batch, out_dir, step=None, max_items=4):
     print_rank0(f"[vae_roundtrip_test] step={step} MSE(input_01, recon_01)={mse:.6f}")
     with open(log_path, "a") as f:
         f.write(f"step={step} [vae_roundtrip_test] MSE(input_01, recon_01)={mse:.6f}\n")
+    _append_csv_row(log_path, dict(step=step, name="vae_roundtrip_test", mse=f"{mse:.6f}"))
